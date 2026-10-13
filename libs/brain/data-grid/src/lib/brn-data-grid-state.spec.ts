@@ -4,6 +4,9 @@ import {
 	columnFilteringFeature,
 	columnVisibilityFeature,
 	createColumnHelper,
+	filterFn_includesString,
+	filterFn_weakEquals,
+	globalFilteringFeature,
 	rowPaginationFeature,
 	rowSortingFeature,
 	tableFeatures,
@@ -55,8 +58,12 @@ type DebounceUser = { name: string; email: string };
 const debounceFeatures = tableFeatures({
 	columnFilteringFeature,
 	columnVisibilityFeature,
+	globalFilteringFeature,
 	rowPaginationFeature,
 	rowSortingFeature,
+	// v9 resolves a column's filter function by name from this registry, and picks `weakEquals` while
+	// the table still has no rows (the first page has not arrived yet), so both paths must be registered.
+	filterFns: { includesString: filterFn_includesString, weakEquals: filterFn_weakEquals },
 });
 
 const debounceColumnHelper = createColumnHelper<typeof debounceFeatures, DebounceUser>();
@@ -77,7 +84,7 @@ describe('injectBrnDataGrid filter debounce', () => {
 
 	function createGrid(debounceMs = 60) {
 		return TestBed.runInInjectionContext(() =>
-			injectBrnDataGrid<DebounceUser>({
+			injectBrnDataGrid({
 				adapter: createRestAdapter<DebounceUser>({
 					baseUrl: '/api/users',
 					fetchFn: async () => ({ rows: [], total: 0 }),
@@ -96,15 +103,70 @@ describe('injectBrnDataGrid filter debounce', () => {
 		const before = grid.query();
 		grid.table.getColumn('email')?.setFilterValue('ada');
 		TestBed.inject(ApplicationRef).tick();
-		// Immediate UI state (input stays responsive) while the query is debounced.
-		// (Asserted on the TanStack-visible state signal: the table instance itself only
-		// re-syncs on change detection, which this injection-context test does not run.)
-		expect(grid.state().filters).toEqual([{ id: 'email', value: 'ada' }]);
+		// The applied state, and with it the query, waits for the debounce window while the table
+		// keeps the raw slice (its read-back is covered by the directive spec, which runs a fixture).
+		expect(grid.state().filters).toEqual([]);
 		expect(grid.query()).toEqual(before);
 		await sleep(200);
 		TestBed.inject(ApplicationRef).tick();
+		// The applied filter carries its resolved operator, so adapters never have to guess one.
+		expect(grid.state().filters).toEqual([{ id: 'email', value: 'ada', operator: 'contains' }]);
 		expect(grid.query()['filter[email]']).toBe('ada');
 		expect(grid.query()).not.toEqual(before);
+	});
+
+	it('resets to the first page when a filter is applied', async () => {
+		const grid = createGrid(20);
+		TestBed.inject(ApplicationRef).tick();
+		grid.table.setPageIndex(2);
+		TestBed.inject(ApplicationRef).tick();
+		expect(grid.query().page).toBe('3');
+
+		grid.table.getColumn('email')?.setFilterValue('ada');
+		TestBed.inject(ApplicationRef).tick();
+		await sleep(150);
+		TestBed.inject(ApplicationRef).tick();
+
+		// Page 3 of the unfiltered set is meaningless once a filter narrows it.
+		expect(grid.query().page).toBe('1');
+		expect(grid.query()['filter[email]']).toBe('ada');
+	});
+
+	it('resets to the first page when the sort changes', async () => {
+		const grid = createGrid(20);
+		TestBed.inject(ApplicationRef).tick();
+		grid.table.setPageIndex(2);
+		TestBed.inject(ApplicationRef).tick();
+		expect(grid.query().page).toBe('3');
+
+		grid.table.setSorting([{ id: 'email', desc: true }]);
+		TestBed.inject(ApplicationRef).tick();
+
+		expect(grid.query().page).toBe('1');
+		expect(grid.query().sortBy).toBe('email');
+	});
+
+	it('wires the global filter through the table state into the query', async () => {
+		const grid = createGrid(20);
+		TestBed.inject(ApplicationRef).tick();
+		expect(grid.query().q).toBeUndefined();
+
+		grid.table.setGlobalFilter('ada');
+		TestBed.inject(ApplicationRef).tick();
+		// Debounced like the column filters.
+		expect(grid.query().q).toBeUndefined();
+		await sleep(150);
+		TestBed.inject(ApplicationRef).tick();
+
+		expect(grid.state().globalFilter).toBe('ada');
+		expect(grid.query().q).toBe('ada');
+
+		grid.table.setGlobalFilter('');
+		TestBed.inject(ApplicationRef).tick();
+		await sleep(150);
+		TestBed.inject(ApplicationRef).tick();
+		expect(grid.state().globalFilter).toBeUndefined();
+		expect(grid.query().q).toBeUndefined();
 	});
 
 	it('applies pagination immediately, flushing a pending filter', async () => {
@@ -115,6 +177,7 @@ describe('injectBrnDataGrid filter debounce', () => {
 		grid.table.setPageIndex(1);
 		TestBed.inject(ApplicationRef).tick();
 		// No sleep: page/sort skip the debounce window and carry pending filters with them.
+		// Paging does not reset the page it was just asked for.
 		expect(grid.query().page).toBe('2');
 		expect(grid.query()['filter[email]']).toBe('ada');
 	});
