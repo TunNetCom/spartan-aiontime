@@ -1,14 +1,14 @@
-import { Component, computed } from '@angular/core';
-import { createODataAdapter, injectBrnDataGrid } from '@spartan-ng/brain/data-grid';
+import { Component, computed, viewChild } from '@angular/core';
+import { createODataAdapter } from '@spartan-ng/brain/data-grid';
 import { HlmButtonImports } from '@spartan-ng/helm/button';
-import { HlmDataGridImports } from '@spartan-ng/helm/data-grid';
+import { HlmDataGrid } from '@spartan-ng/helm/data-grid';
 import { HlmInputImports } from '@spartan-ng/helm/input';
-import { HlmTableImports } from '@spartan-ng/helm/table';
 import {
 	columnFilteringFeature,
 	columnVisibilityFeature,
 	createColumnHelper,
-	FlexRender,
+	filterFn_includesString,
+	filterFn_weakEquals,
 	rowPaginationFeature,
 	rowSelectionFeature,
 	rowSortingFeature,
@@ -27,6 +27,9 @@ const features = tableFeatures({
 	rowPaginationFeature,
 	rowSelectionFeature,
 	rowSortingFeature,
+	// v9 resolves filter functions by name from this registry, and picks `weakEquals` before the first
+	// page of rows arrives, so both the string and the empty-table fallback are registered.
+	filterFns: { includesString: filterFn_includesString, weakEquals: filterFn_weakEquals },
 });
 
 export type DataGridODataFeatures = typeof features;
@@ -61,6 +64,8 @@ const USERS: DataGridODataUser[] = [
 
 const adapter = createODataAdapter<DataGridODataUser>({
 	baseUrl: '/odata/Users',
+	// The mock only searches emails, so the global filter is pointed at that field.
+	globalFilterFields: ['email'],
 	fetchFn: async (url, signal) => {
 		signal.throwIfAborted();
 		const params = new URLSearchParams(url.split('?')[1] ?? '');
@@ -82,65 +87,39 @@ const adapter = createODataAdapter<DataGridODataUser>({
 
 @Component({
 	selector: 'spartan-data-grid-odata-preview',
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmInputImports, HlmButtonImports],
+	imports: [HlmDataGrid, HlmInputImports, HlmButtonImports],
 	host: { class: 'w-full' },
 	template: `
 		<div class="flex flex-col gap-2 py-4 sm:flex-row sm:items-center">
 			<input hlmInput class="w-full md:max-w-sm" placeholder="Filter emails..." (input)="_filterChanged($event)" />
 			<button hlmBtn variant="outline" size="sm" (click)="_toggleEmailSort()">Sort by email {{ _sortLabel() }}</button>
 		</div>
-		<p class="text-muted-foreground font-mono text-xs break-all">GET /odata/Users?{{ _grid.query() }}</p>
-		<hlm-data-grid [loading]="_grid.loading()" [error]="_grid.error()" [total]="_grid.total()" [retry]="_grid.reload">
-			<thead>
-				@for (headerGroup of _grid.table.getHeaderGroups(); track headerGroup.id) {
-					<tr hlmTr>
-						@for (header of headerGroup.headers; track header.id) {
-							<th hlmTh [attr.colSpan]="header.colSpan">
-								@if (!header.isPlaceholder) {
-									<ng-container
-										*flexRender="header.column.columnDef.header; props: header.getContext(); let headerText"
-									>
-										<div [innerHTML]="headerText"></div>
-									</ng-container>
-								}
-							</th>
-						}
-					</tr>
-				}
-			</thead>
-			@for (row of _grid.table.getRowModel().rows; track row.id) {
-				<tr hlmTr>
-					@for (cell of row.getVisibleCells(); track cell.id) {
-						<td hlmTd>
-							<ng-container *flexRender="cell.column.columnDef.cell; props: cell.getContext(); let cellText">
-								<div [innerHTML]="cellText"></div>
-							</ng-container>
-						</td>
-					}
-				</tr>
-			}
-		</hlm-data-grid>
-		<hlm-data-grid-pagination [table]="_grid.table" />
+		<p class="text-muted-foreground font-mono text-xs break-all">GET /odata/Users?{{ _query() }}</p>
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
 	`,
 })
 export class DataGridODataPreview {
-	protected readonly _grid = injectBrnDataGrid<DataGridODataUser>({
-		adapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
+	public readonly adapter = adapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+
+	protected readonly _query = computed(() => adapter.buildQuery(this._grid().state()));
 
 	protected readonly _sortLabel = computed(() => {
-		const sort = this._grid.table.getColumn('email')?.getIsSorted();
+		const sort = this._grid().table.getColumn('email')?.getIsSorted();
 		return sort === 'desc' ? '↓' : sort === 'asc' ? '↑' : '↕';
 	});
 
 	protected _filterChanged(event: Event) {
-		this._grid.table.getColumn('email')?.setFilterValue((event.target as HTMLInputElement).value);
+		this._grid()
+			.table.getColumn('email')
+			?.setFilterValue((event.target as HTMLInputElement).value);
 	}
 
 	protected _toggleEmailSort() {
-		this._grid.table.getColumn('email')?.toggleSorting();
+		this._grid().table.getColumn('email')?.toggleSorting();
 	}
 }

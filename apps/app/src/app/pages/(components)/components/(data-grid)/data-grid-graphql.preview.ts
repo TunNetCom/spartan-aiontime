@@ -1,14 +1,13 @@
-import { Component, computed } from '@angular/core';
-import { createGraphQLAdapter, injectBrnDataGrid } from '@spartan-ng/brain/data-grid';
-import { HlmButtonImports } from '@spartan-ng/helm/button';
-import { HlmDataGridImports } from '@spartan-ng/helm/data-grid';
+import { Component, computed, viewChild } from '@angular/core';
+import { createGraphQLAdapter } from '@spartan-ng/brain/data-grid';
+import { HlmDataGrid } from '@spartan-ng/helm/data-grid';
 import { HlmInputImports } from '@spartan-ng/helm/input';
-import { HlmTableImports } from '@spartan-ng/helm/table';
 import {
 	columnFilteringFeature,
 	columnVisibilityFeature,
 	createColumnHelper,
-	FlexRender,
+	filterFn_includesString,
+	filterFn_weakEquals,
 	rowPaginationFeature,
 	rowSelectionFeature,
 	rowSortingFeature,
@@ -27,6 +26,9 @@ const features = tableFeatures({
 	rowPaginationFeature,
 	rowSelectionFeature,
 	rowSortingFeature,
+	// v9 resolves filter functions by name from this registry, and picks `weakEquals` before the first
+	// page of rows arrives, so both the string and the empty-table fallback are registered.
+	filterFns: { includesString: filterFn_includesString, weakEquals: filterFn_weakEquals },
 });
 
 export type DataGridGraphQLFeatures = typeof features;
@@ -79,57 +81,29 @@ const adapter = createGraphQLAdapter<DataGridGraphQLUser>({
 
 @Component({
 	selector: 'spartan-data-grid-graphql-preview',
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmInputImports, HlmButtonImports],
+	imports: [HlmDataGrid, HlmInputImports],
 	host: { class: 'w-full' },
 	template: `
 		<div class="flex items-center gap-2 py-4">
 			<input hlmInput class="w-full md:max-w-sm" placeholder="Filter emails..." (input)="_filterChanged($event)" />
 		</div>
 		<pre class="text-muted-foreground overflow-x-auto font-mono text-xs">{{ _variables() }}</pre>
-		<hlm-data-grid [loading]="_grid.loading()" [error]="_grid.error()" [total]="_grid.total()" [retry]="_grid.reload">
-			<thead>
-				@for (headerGroup of _grid.table.getHeaderGroups(); track headerGroup.id) {
-					<tr hlmTr>
-						@for (header of headerGroup.headers; track header.id) {
-							<th hlmTh [attr.colSpan]="header.colSpan">
-								@if (!header.isPlaceholder) {
-									<ng-container
-										*flexRender="header.column.columnDef.header; props: header.getContext(); let headerText"
-									>
-										<div [innerHTML]="headerText"></div>
-									</ng-container>
-								}
-							</th>
-						}
-					</tr>
-				}
-			</thead>
-			@for (row of _grid.table.getRowModel().rows; track row.id) {
-				<tr hlmTr>
-					@for (cell of row.getVisibleCells(); track cell.id) {
-						<td hlmTd>
-							<ng-container *flexRender="cell.column.columnDef.cell; props: cell.getContext(); let cellText">
-								<div [innerHTML]="cellText"></div>
-							</ng-container>
-						</td>
-					}
-				</tr>
-			}
-		</hlm-data-grid>
-		<hlm-data-grid-pagination [table]="_grid.table" />
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
 	`,
 })
 export class DataGridGraphQLPreview {
-	protected readonly _grid = injectBrnDataGrid<DataGridGraphQLUser>({
-		adapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
+	public readonly adapter = adapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
 
-	protected readonly _variables = computed(() => JSON.stringify(this._grid.query(), null, 2));
+	private readonly _grid = viewChild.required(HlmDataGrid);
+
+	protected readonly _variables = computed(() => JSON.stringify(adapter.buildQuery(this._grid().state()), null, 2));
 
 	protected _filterChanged(event: Event) {
-		this._grid.table.getColumn('email')?.setFilterValue((event.target as HTMLInputElement).value);
+		this._grid()
+			.table.getColumn('email')
+			?.setFilterValue((event.target as HTMLInputElement).value);
 	}
 }

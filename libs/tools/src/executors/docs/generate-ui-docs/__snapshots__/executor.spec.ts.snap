@@ -3606,28 +3606,113 @@ exports[`generate-ui-docs executor > produces stable output 1`] = `
     },
   },
   "data-grid": {
+    "brain": {
+      "BrnDataGrid": {
+        "exportAs": "brnDataGrid",
+        "inputs": [
+          {
+            "name": "adapter",
+            "required": true,
+            "type": "BrnDataAdapter<TData, any>",
+          },
+          {
+            "name": "features",
+            "required": true,
+            "type": "TableFeatures",
+          },
+          {
+            "name": "columns",
+            "required": true,
+            "type": "ColumnDef<any, TData, any>[]",
+          },
+          {
+            "name": "initial",
+            "required": false,
+            "type": "Partial<BrnGridState>",
+          },
+          {
+            "name": "debounceMs",
+            "required": false,
+            "type": "unknown",
+          },
+        ],
+        "models": [],
+        "outputs": [],
+        "selector": "[brnDataGrid]",
+      },
+    },
     "helm": {
       "HlmDataGrid": {
         "inputs": [
           {
-            "name": "loading",
+            "name": "adapter",
+            "required": true,
+            "type": "BrnDataAdapter<TData, any>",
+          },
+          {
+            "name": "features",
+            "required": true,
+            "type": "TableFeatures",
+          },
+          {
+            "name": "columns",
+            "required": true,
+            "type": "ColumnDef<any, TData, any>[]",
+          },
+          {
+            "name": "initial",
+            "required": false,
+            "type": "Partial<BrnGridState>",
+          },
+          {
+            "name": "debounceMs",
             "required": false,
             "type": "unknown",
           },
           {
-            "name": "error",
+            "name": "showToolbar",
             "required": false,
             "type": "unknown",
           },
           {
-            "name": "total",
+            "name": "showColumnFilters",
             "required": false,
             "type": "unknown",
           },
           {
-            "name": "retry",
+            "name": "searchLabel",
             "required": false,
-            "type": "() => void",
+            "type": "unknown",
+          },
+          {
+            "name": "searchPlaceholder",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "clearAllText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "loadingText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "emptyText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "errorText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "retryText",
+            "required": false,
+            "type": "unknown",
           },
           {
             "name": "class",
@@ -3636,7 +3721,12 @@ exports[`generate-ui-docs executor > produces stable output 1`] = `
           },
         ],
         "models": [],
-        "outputs": [],
+        "outputs": [
+          {
+            "name": "retry",
+            "type": "void",
+          },
+        ],
         "selector": "hlm-data-grid",
       },
       "HlmDataGridPagination": {
@@ -3644,7 +3734,7 @@ exports[`generate-ui-docs executor > produces stable output 1`] = `
           {
             "name": "table",
             "required": false,
-            "type": "any",
+            "type": "Table<any, TData> | null",
           },
           {
             "name": "class",

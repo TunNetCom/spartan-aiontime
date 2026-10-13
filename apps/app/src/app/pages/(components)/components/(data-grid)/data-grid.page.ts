@@ -71,11 +71,12 @@ export const routeMeta: RouteMeta = {
 			<p class="${hlmP}">
 				The generator copies the
 				<code class="${hlmCode}">hlm-data-grid</code>
-				shell into your project and installs
-				<code class="${hlmCode}">&#64;tanstack/angular-table</code>
-				alongside it. Pair it with
+				component into your project and installs
 				<code class="${hlmCode}">&#64;spartan-ng/brain/data-grid</code>
-				for the headless adapters below.
+				and
+				<code class="${hlmCode}">&#64;tanstack/angular-table</code>
+				alongside it. The component already composes the headless grid, so all it needs from you is an adapter and your
+				column definitions.
 			</p>
 
 			<spartan-section-sub-heading id="usage">Usage</spartan-section-sub-heading>
@@ -84,12 +85,43 @@ export const routeMeta: RouteMeta = {
 				<spartan-code [code]="_codeSkeleton" />
 			</div>
 
+			<spartan-section-sub-heading id="sorting-filtering">Sorting & filtering</spartan-section-sub-heading>
+			<p class="${hlmP}">
+				The grid ships its sorting and filtering UI: every sortable header renders a sort button with
+				<code class="${hlmCode}">aria-sort</code>
+				(shift-click adds a multi-column sort), and the toolbar holds the global search, the active-filter chips, and
+				the clear-all action. Per-column filter controls come from the column definition's
+				<code class="${hlmCode}">meta.filter</code>
+				(
+				<code class="${hlmCode}">BrnDataGridColumnMeta</code>
+				): declare the column
+				<code class="${hlmCode}">type</code>
+				(
+				<code class="${hlmCode}">string | number | date | boolean | select</code>
+				) and the grid renders the matching control — text operators, numeric and date ranges, boolean and option
+				selects — and resolves each filter to its operator before the adapter maps it. Filtering needs
+				<code class="${hlmCode}">columnFilteringFeature</code>
+				in your features, the toolbar search needs
+				<code class="${hlmCode}">globalFilteringFeature</code>
+				. For fully custom controls, drive the exposed
+				<code class="${hlmCode}">table</code>
+				(
+				<code class="${hlmCode}">column.setFilterValue({{ '{' }} operator, value {{ '}' }})</code>
+				,
+				<code class="${hlmCode}">column.toggleSorting</code>
+				,
+				<code class="${hlmCode}">table.setGlobalFilter</code>
+				) instead.
+			</p>
+
 			<spartan-section-sub-heading id="server-pagination">Server pagination (REST)</spartan-section-sub-heading>
 			<p class="${hlmP}">
 				Point
 				<code class="${hlmCode}">createRestAdapter</code>
-				at your endpoint and
-				<code class="${hlmCode}">injectBrnDataGrid</code>
+				at your endpoint and pass it to
+				<code class="${hlmCode}">hlm-data-grid</code>
+				. The composed
+				<code class="${hlmCode}">BrnDataGrid</code>
 				maps page, page size, sorting, and filters to query params (
 				<code class="${hlmCode}">page</code>
 				,
@@ -110,7 +142,13 @@ export const routeMeta: RouteMeta = {
 				<code class="${hlmCode}">debounceMs</code>
 				(default 300ms) while page and sort apply immediately, and
 				<code class="${hlmCode}">serverFetch</code>
-				is reserved for a future opt-in fetch mode.
+				is reserved for a future opt-in fetch mode. A multi-column sort adds a
+				<code class="${hlmCode}">sort</code>
+				list (
+				<code class="${hlmCode}">name:asc,email:desc</code>
+				) alongside
+				<code class="${hlmCode}">sortBy/sortDir</code>
+				, which only describe one column.
 			</p>
 			<spartan-tabs firstTab="Preview" secondTab="Code">
 				<div spartanCodePreview firstTab>
@@ -138,7 +176,10 @@ export const routeMeta: RouteMeta = {
 				<code class="${hlmCode}">'</code>
 				as
 				<code class="${hlmCode}">''</code>
-				so names like O'Brien keep returning rows instead of a 400.
+				so names like O'Brien keep returning rows instead of a 400. The global filter searches only the fields you name
+				in
+				<code class="${hlmCode}">globalFilterFields</code>
+				and is ignored without them, rather than guessed at a field your entity may not have.
 			</p>
 			<spartan-tabs firstTab="Preview" secondTab="Code">
 				<div spartanCodePreview firstTab>
@@ -162,6 +203,8 @@ export const routeMeta: RouteMeta = {
 				<code class="${hlmCode}">first/after</code>
 				with
 				<code class="${hlmCode}">mode: 'cursor'</code>
+				, where you resolve the opaque per-page token through
+				<code class="${hlmCode}">getCursor</code>
 				) and hands them to your
 				<code class="${hlmCode}">fetchFn</code>
 				, so any client or codegen'd query works without a normalized cache.
