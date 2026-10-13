@@ -215,3 +215,11 @@ describe('odata typed values', () => {
 		);
 	});
 });
+
+describe('odata negations', () => {
+	it('maps notEquals', () => {
+		expect(toODataFilterExpression({ id: 'name', operator: 'notEquals', value: 'x', type: 'string' })).toBe(
+			`name ne 'x'`,
+		);
+	});
+});

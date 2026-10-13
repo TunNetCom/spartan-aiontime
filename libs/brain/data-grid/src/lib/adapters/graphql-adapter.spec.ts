@@ -174,3 +174,11 @@ describe('graphql typed values', () => {
 		});
 	});
 });
+
+describe('graphql negations', () => {
+	it('maps notContains', () => {
+		expect(toGraphQLFilterValue({ id: 'name', operator: 'notContains', value: 'x', type: 'string' })).toEqual({
+			notContains: 'x',
+		});
+	});
+});

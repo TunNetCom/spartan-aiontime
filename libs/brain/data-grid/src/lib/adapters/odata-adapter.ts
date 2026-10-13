@@ -2,12 +2,30 @@ import {
 	toBrnComparisons,
 	type BrnDataAdapter,
 	type BrnFilter,
+	type BrnFilterGroup,
 	type BrnFilterType,
 	type BrnGridState,
 } from '../brn-data-source';
 
 const esc = (v: unknown) => String(v ?? '').replace(/'/g, "''");
 const isBlank = (value: unknown) => value === undefined || value === null || value === '';
+
+type FilterWithCase = BrnFilter & { caseSensitive?: boolean };
+
+function isFilterGroup(filter: BrnFilter | BrnFilterGroup): filter is BrnFilterGroup {
+	return 'logic' in filter && 'filters' in filter;
+}
+
+/**
+ * Explicit opt-out of the legacy byte-identical output: only `caseSensitive: false` (on the single
+ * or on the parent group) enables `tolower()` wrapping. `true` always wins over `false`, and
+ * `undefined` keeps the historic output so old singles stay byte-identical.
+ */
+function isInsensitive(filter: BrnFilter, group?: BrnFilterGroup): boolean {
+	const single = (filter as FilterWithCase).caseSensitive;
+	if (single === true || group?.caseSensitive === true) return false;
+	return single === false || group?.caseSensitive === false;
+}
 
 /**
  * Formats a filter value as an OData literal. A declared column type wins; without one, numbers and
@@ -32,28 +50,63 @@ function odataLiteral(value: unknown, type?: BrnFilterType): string {
 /**
  * Builds the `$filter` expression for one grid filter, or `undefined` when it carries nothing to send.
  * Comparisons use the OData operator that matches the grid operator (`gte` becomes `ge`), ranges are
- * AND-ed, and sets are OR-ed.
+ * AND-ed, and sets are OR-ed. A group joins its members with its logic (`(a and b)`).
+ * Text ops wrap both sides with `tolower()` only for an explicit opt-out (`caseSensitive: false`);
+ * legacy singles without the flag stay byte-identical.
  */
-export function toODataFilterExpression(filter: BrnFilter): string | undefined {
+export function toODataFilterExpression(filter: BrnFilter | BrnFilterGroup): string | undefined {
+	if (isFilterGroup(filter)) {
+		const parts = filter.filters
+			.map((entry) => toODataSingle(entry, filter))
+			.filter((expression): expression is string => !!expression);
+		if (!parts.length) return undefined;
+		return `(${parts.join(` ${filter.logic} `)})`;
+	}
+	return toODataSingle(filter);
+}
+
+function toODataSingle(filter: BrnFilter, group?: BrnFilterGroup): string | undefined {
 	const field = filter.id;
 
 	if (filter.operator === 'isEmpty') return `${field} eq null`;
 	if (filter.operator === 'notEmpty') return `${field} ne null`;
+	if (filter.operator === 'isNull') return `${field} eq null`;
+	if (filter.operator === 'notNull') return `${field} ne null`;
 	if (!Array.isArray(filter.value) && isBlank(filter.value)) return undefined;
+
+	const insensitive = isInsensitive(filter, group);
+	const column = insensitive ? `tolower(${field})` : field;
+	const literal = (value: unknown) => {
+		const raw = odataLiteral(value, filter.type);
+		return insensitive ? `tolower(${raw})` : raw;
+	};
+	// `ne`/`eq` only fold case for string-like columns; numbers, booleans and dates stay bare.
+	const foldable = (value: unknown) =>
+		insensitive &&
+		(filter.type === 'string' || filter.type === 'select' || (filter.type === undefined && typeof value === 'string'));
 
 	switch (filter.operator) {
 		case 'contains':
-			return `contains(${field},${odataLiteral(filter.value, filter.type)})`;
+			return `contains(${column},${literal(filter.value)})`;
+		case 'notContains':
+			return `not contains(${column},${literal(filter.value)})`;
 		case 'startsWith':
-			return `startswith(${field},${odataLiteral(filter.value, filter.type)})`;
+			return `startswith(${column},${literal(filter.value)})`;
 		case 'endsWith':
-			return `endswith(${field},${odataLiteral(filter.value, filter.type)})`;
+			return `endswith(${column},${literal(filter.value)})`;
+		case 'notEquals':
+			return foldable(filter.value)
+				? `${column} ne ${literal(filter.value)}`
+				: `${field} ne ${odataLiteral(filter.value, filter.type)}`;
 		case 'equals':
 		case 'gt':
 		case 'gte':
 		case 'lt':
 		case 'lte':
 		case 'between': {
+			if (filter.operator === 'equals' && foldable(filter.value)) {
+				return `${column} eq ${literal(filter.value)}`;
+			}
 			const comparisons = { eq: 'eq', gt: 'gt', gte: 'ge', lt: 'lt', lte: 'le' } as const;
 			const bounds = (toBrnComparisons(filter) ?? []).map(
 				({ operator, value }) => `${field} ${comparisons[operator]} ${odataLiteral(value, filter.type)}`,
@@ -91,7 +144,11 @@ export function buildODataQueryString(s: BrnGridState, opts: ODataAdapterOptions
 		parts.push(`$orderby=${s.sorting.map((x) => `${encodeURIComponent(x.id)} ${x.desc ? 'desc' : 'asc'}`).join(',')}`);
 	}
 	const filters = s.filters
-		.map((filter) => (opts.mapFilter ? opts.mapFilter(filter) : toODataFilterExpression(filter)))
+		.map((filter) => {
+			const entry = filter as BrnFilter | BrnFilterGroup;
+			if (isFilterGroup(entry)) return toODataFilterExpression(entry);
+			return opts.mapFilter ? opts.mapFilter(entry) : toODataFilterExpression(entry);
+		})
 		.filter((expression): expression is string => !!expression);
 	if (s.globalFilter && opts.globalFilterFields?.length) {
 		const term = esc(s.globalFilter);

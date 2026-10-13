@@ -2,6 +2,7 @@ import {
 	toBrnComparisons,
 	type BrnDataAdapter,
 	type BrnFilter,
+	type BrnFilterGroup,
 	type BrnGridState,
 	type BrnSort,
 } from '../brn-data-source';
@@ -18,20 +19,70 @@ export type GraphQLVariables = {
 
 const isBlank = (value: unknown) => value === undefined || value === null || value === '';
 
+type FilterWithCase = BrnFilter & { caseSensitive?: boolean };
+
+function isFilterGroup(filter: BrnFilter | BrnFilterGroup): filter is BrnFilterGroup {
+	return 'logic' in filter && 'filters' in filter;
+}
+
+/**
+ * Explicit opt-out of the legacy byte-identical output: only `caseSensitive: false` (on the single
+ * or on the parent group) adds `mode: 'insensitive'` to text ops. `true` wins, `undefined` keeps
+ * the historic fragment so old singles stay byte-identical.
+ */
+function isInsensitive(filter: BrnFilter, group?: BrnFilterGroup): boolean {
+	const single = (filter as FilterWithCase).caseSensitive;
+	if (single === true || group?.caseSensitive === true) return false;
+	return single === false || group?.caseSensitive === false;
+}
+
+function isStringLike(filter: BrnFilter, value: unknown): boolean {
+	return (
+		filter.type === 'string' || filter.type === 'select' || (filter.type === undefined && typeof value === 'string')
+	);
+}
+
 /**
  * The default `where` fragment for one grid filter, keyed by the operator name so it lines up with the
  * grid's own vocabulary. Ranges become `{ gte, lte }` with blank bounds dropped, sets become `{ in }`.
  * Values arrive already coerced to the column's declared type (`30`, not `'30'`), which typed GraphQL
  * schemas require; date-only bounds cover the whole calendar day (`{ gte: day, lt: next day }`).
+ * A group becomes `{ and: [...] }` / `{ or: [...] }`; text ops gain `mode: 'insensitive'` only for an
+ * explicit opt-out so legacy singles stay byte-identical.
  */
-export function toGraphQLFilterValue(filter: BrnFilter): Record<string, unknown> | undefined {
+export function toGraphQLFilterValue(filter: BrnFilter | BrnFilterGroup): Record<string, unknown> | undefined {
+	if (isFilterGroup(filter)) {
+		const parts = filter.filters
+			.map((entry) => {
+				const fragment = toGraphQLSingle(entry, filter);
+				return fragment ? { [entry.id]: fragment } : undefined;
+			})
+			.filter((part): part is Record<string, unknown> => !!part);
+		if (!parts.length) return undefined;
+		return { [filter.logic]: parts };
+	}
+	return toGraphQLSingle(filter);
+}
+
+function toGraphQLSingle(filter: BrnFilter, group?: BrnFilterGroup): Record<string, unknown> | undefined {
+	const insensitive = isInsensitive(filter, group);
+	const withMode = (fragment: Record<string, unknown>) =>
+		insensitive ? { ...fragment, mode: 'insensitive' } : fragment;
 	switch (filter.operator) {
 		case 'contains':
-			return { contains: filter.value };
+			return withMode({ contains: filter.value });
+		case 'notContains':
+			return withMode({ notContains: filter.value });
 		case 'startsWith':
-			return { startsWith: filter.value };
+			return withMode({ startsWith: filter.value });
 		case 'endsWith':
-			return { endsWith: filter.value };
+			return withMode({ endsWith: filter.value });
+		case 'notEquals':
+			return isStringLike(filter, filter.value) ? withMode({ notEquals: filter.value }) : { notEquals: filter.value };
+		case 'isNull':
+			return { isNull: true };
+		case 'notNull':
+			return { notNull: true };
 		case 'equals':
 		case 'gt':
 		case 'gte':
@@ -42,7 +93,11 @@ export function toGraphQLFilterValue(filter: BrnFilter): Record<string, unknown>
 			for (const { operator, value } of toBrnComparisons(filter) ?? []) {
 				bounds[operator === 'eq' ? 'equals' : operator] = value;
 			}
-			return Object.keys(bounds).length ? bounds : undefined;
+			if (!Object.keys(bounds).length) return undefined;
+			if (filter.operator === 'equals' && insensitive && isStringLike(filter, filter.value)) {
+				return { ...bounds, mode: 'insensitive' };
+			}
+			return bounds;
 		}
 		case 'in': {
 			const list = (Array.isArray(filter.value) ? filter.value : [filter.value]).filter((v) => !isBlank(v));
@@ -92,15 +147,29 @@ export function createGraphQLAdapter<TData>(
 			const orderBy = s.sorting.map((x) => (opts.mapSort ? opts.mapSort(x) : { [x.id]: x.desc ? 'DESC' : 'ASC' }));
 			const where: Record<string, unknown> = {};
 			for (const filter of s.filters) {
+				const entry = filter as BrnFilter | BrnFilterGroup;
+				if (isFilterGroup(entry)) {
+					const groupFragment = toGraphQLFilterValue(entry);
+					if (!groupFragment) continue;
+					for (const [key, value] of Object.entries(groupFragment)) {
+						const existing = where[key];
+						if (Array.isArray(existing) && Array.isArray(value)) {
+							where[key] = [...existing, ...(value as unknown[])];
+						} else {
+							where[key] = value;
+						}
+					}
+					continue;
+				}
 				if (opts.mapFilter) {
-					const fragment = opts.mapFilter(filter);
+					const fragment = opts.mapFilter(entry);
 					if (!fragment) continue;
 					Object.assign(where, fragment);
 					continue;
 				}
-				const fragment = toGraphQLFilterValue(filter);
+				const fragment = toGraphQLFilterValue(entry);
 				if (!fragment) continue;
-				Object.assign(where, { [filter.id]: fragment });
+				Object.assign(where, { [entry.id]: fragment });
 			}
 			if (getCursor) {
 				if (s.page === 0) {

@@ -218,3 +218,11 @@ describe('rest typed values', () => {
 		});
 	});
 });
+
+describe('rest negations', () => {
+	it('maps notContains', () => {
+		expect(toRestFilterParams({ id: 'name', operator: 'notContains', value: 'x', type: 'string' })).toEqual({
+			'filter[name][notContains]': 'x',
+		});
+	});
+});
