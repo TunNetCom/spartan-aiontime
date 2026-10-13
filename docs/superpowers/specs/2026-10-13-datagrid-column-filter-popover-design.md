@@ -51,13 +51,25 @@ Alternatives considered: (B) two entries sharing one id (keeps `BrnFilter` but b
 
 ## 8. Integration and repo ripple (§5 approved)
 
+### Architecture compliance (must hold 100%)
+
+- Brain `libs/brain/data-grid` stays headless: only `@angular/core` signals + structural TanStack types (`BrnFilterableColumn`); no helm imports; pure draft fns have no Angular. Helm `libs/helm/data-grid` imports brain + helm primitives only.
+- No new entrypoints: reuse `brain/data-grid` and `helm/data-grid` entrypoints; no `tsconfig.base.json` / `ng-package.json` change; Nx module-boundary lint must pass.
+- Helm patterns: `hostDirectives` for `BrnColumnFilter`, `classes()`/`hlm()` styling, `hlm-popover` + `*hlmPopoverPortal` (date-picker pattern), native select/date inputs inside popover, Lucide `filter` icon via existing icon setup.
+- Exports: add `HlmDataGridColumnFilter` to `HlmDataGridImports`, `BrnColumnFilter` to `BrnDataGridImports`; re-export `HLM_DATA_GRID_OPERATOR_LABELS` from `hlm-data-grid.ts`.
+- CLI mirror: `libs/cli/src/generators/ui/libs/data-grid/files/lib/` templates byte-mirror helm (logic identical); add `popover` to data-grid deps in `primitive-deps.ts`; check `supported-ui-libraries.json` for `@angular/cdk` (as date-picker does).
+
+### Code changes
+
 - `HlmDataGrid` header → sort button + `<hlm-data-grid-column-filter [column] [labels]>`; delete `_spec`, `_onOperator`, `_onText`, `_onRange`, `_onChoice`, `_onToggleOption`, `_filterRoot`, `_rootOperator`, `_rootValues`, `_textValue`, `_range`, `_booleanValue`, `_chosen`, `_isChosen` (~350 lines); extend chips to render groups (`A or B`); keep `data-slot` names.
-- Re-export `HLM_DATA_GRID_OPERATOR_LABELS` from `hlm-data-grid.ts`; add `HlmDataGridColumnFilter` to `HlmDataGridImports`, `BrnColumnFilter` to `BrnDataGridImports`.
-- CLI: add `popover` to data-grid deps in `primitive-deps.ts`, two `.template` files + `index.ts.template` mirroring helm, check `supported-ui-libraries.json` for `@angular/cdk`.
-- Specs/stories/e2e/docs: helm spec (793 lines) opens popover first; story + `data-grid.cy.ts` same; docs page + `executor.spec.ts.snap` updated.
 
 ## 9. Testing, edge cases, PRs (§6 approved)
 
-- Tests: pure draft specs (single + composite), directive TestBed (isolation, one-write Apply + `flushFilters`, empty-Apply removes, page reset to 0), adapter specs per operator + group join + case + date-day windows, helm specs via popover open → set → Apply.
+### Test + Storybook checklist (nothing skipped)
+
+- Brain: `brn-column-filter-draft.spec.ts` (single + composite transitions), `brn-column-filter.spec.ts` (TestBed: isolation, one-write Apply + `flushFilters`, empty-Apply removes, page reset to 0), `brn-data-source.spec.ts`, `brn-data-grid-state.spec.ts`, `adapters/rest-adapter.spec.ts`, `adapters/odata-adapter.spec.ts`, `adapters/graphql-adapter.spec.ts` (new operators + group join + case + date-day windows).
+- Helm: `hlm-data-grid.spec.ts` rewritten to open the popover first (simple + advanced, all 5 types, active dot, group chips, Clear/Apply, Enter/Escape).
+- CLI/tools: `primitive-deps.spec.ts`, scaffold-integrity healthcheck, `executor.spec.ts.snap` regenerated for the new component API.
+- Storybook (must not miss): `apps/ui-storybook/stories/data-grid.stories.ts` gains simple + advanced scenarios per type (string/number/date/boolean/select), active-filter trigger state, and group-chip removal. E2E `apps/ui-storybook-e2e/src/integration/data-grid/data-grid.cy.ts` mirrors them (open popover → set → Apply → query assert).
 - Edges: blank second condition → single; unreadable typed value → `canApply=false`; `between` open bounds allowed; emptiness/null ops carry no value; no-grid use → `isActive=false`, `apply` skips flush.
 - PRs (`data-grid` scope; `lint`, `format:write`, `test`, `build` per `CLAUDE.md`): (1) operators + `toBrnFilterGroup` + adapters; (2) composite draft + directive + `flushFilters` (patch rebased); (3) helm popover + CLI/docs/specs ripple.
