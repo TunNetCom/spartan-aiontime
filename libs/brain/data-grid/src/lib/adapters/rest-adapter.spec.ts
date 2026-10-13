@@ -179,6 +179,24 @@ describe('rest default filter mapping', () => {
 			order: 'name:desc',
 		});
 	});
+	it('maps every sort through mapSort and skips the default sort list', () => {
+		const custom = createRestAdapter<string>({
+			baseUrl: '/x',
+			fetchFn: async () => ({ rows: [], total: 0 }),
+			mapSort: (sort) => ({ [`order[${sort.id}]`]: sort.desc ? 'desc' : 'asc' }),
+		});
+		expect(
+			custom.buildQuery({
+				page: 0,
+				pageSize: 10,
+				sorting: [
+					{ id: 'name', desc: false },
+					{ id: 'email', desc: true },
+				],
+				filters: [],
+			}),
+		).toEqual({ page: '1', pageSize: '10', 'order[name]': 'asc', 'order[email]': 'desc' });
+	});
 });
 
 describe('toRestFilterParams', () => {

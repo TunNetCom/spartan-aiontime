@@ -36,6 +36,7 @@ export function toRestFilterParams(filter: BrnFilter): Record<string, string> {
 export function createRestAdapter<TData>(opts: {
 	baseUrl: string;
 	fetchFn?: (url: string, signal: AbortSignal) => Promise<{ rows: TData[]; total: number }>;
+	/** Overrides the default `sortBy`/`sortDir` mapping for every sorted column. */
 	mapSort?: (sort: BrnSort) => Record<string, string>;
 	/** Overrides the default `filter[id]`/`filter[id][operator]` mapping; return nothing to drop it. */
 	mapFilter?: (filter: BrnFilter) => Record<string, string> | undefined;
@@ -43,16 +44,18 @@ export function createRestAdapter<TData>(opts: {
 	return {
 		buildQuery: (s: BrnGridState) => {
 			const q: Record<string, string> = { page: String(s.page + 1), pageSize: String(s.pageSize) };
-			const [primary, ...rest] = s.sorting;
-			if (primary)
-				Object.assign(
-					q,
-					opts.mapSort ? opts.mapSort(primary) : { sortBy: primary.id, sortDir: primary.desc ? 'desc' : 'asc' },
-				);
-			// `sortBy`/`sortDir` describe a single column, so a multi-column sort is also sent as a
-			// `sort=name:asc,email:desc` list that callers can read. Anything else would drop the
-			// secondary sorts without telling the endpoint or the caller.
-			if (rest.length) q['sort'] = s.sorting.map((x) => `${x.id}:${x.desc ? 'desc' : 'asc'}`).join(',');
+			if (opts.mapSort) {
+				// A custom sort syntax owns every sorted column: emitting the default `sort` list
+				// alongside it would hand the backend two competing syntaxes.
+				for (const sort of s.sorting) Object.assign(q, opts.mapSort(sort));
+			} else {
+				const [primary, ...rest] = s.sorting;
+				if (primary) Object.assign(q, { sortBy: primary.id, sortDir: primary.desc ? 'desc' : 'asc' });
+				// `sortBy`/`sortDir` describe a single column, so a multi-column sort is also sent as a
+				// `sort=name:asc,email:desc` list that callers can read. Anything else would drop the
+				// secondary sorts without telling the endpoint or the caller.
+				if (rest.length) q['sort'] = s.sorting.map((x) => `${x.id}:${x.desc ? 'desc' : 'asc'}`).join(',');
+			}
 			for (const filter of s.filters) {
 				Object.assign(q, opts.mapFilter ? (opts.mapFilter(filter) ?? {}) : toRestFilterParams(filter));
 			}

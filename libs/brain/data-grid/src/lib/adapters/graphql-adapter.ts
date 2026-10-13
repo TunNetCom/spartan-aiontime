@@ -96,14 +96,19 @@ export function createGraphQLAdapter<TData>(
 				if (!fragment) continue;
 				Object.assign(where, { [filter.id]: fragment });
 			}
-			if (getCursor)
-				return {
-					first: s.pageSize,
-					after: s.page > 0 ? getCursor(s.page, s.pageSize) : undefined,
-					orderBy,
-					where,
-					search: s.globalFilter,
-				};
+			if (getCursor) {
+				if (s.page === 0) {
+					return { first: s.pageSize, after: undefined, orderBy, where, search: s.globalFilter };
+				}
+				// Cursor APIs hand back opaque tokens with no page-number mapping. An unknown cursor
+				// must fail loudly: falling back to `after: undefined` would present the first page
+				// as the requested one.
+				const after = getCursor(s.page, s.pageSize);
+				if (after === undefined) {
+					throw new Error(`GraphQL cursor is unknown for page ${s.page}`);
+				}
+				return { first: s.pageSize, after, orderBy, where, search: s.globalFilter };
+			}
 			return { offset: s.page * s.pageSize, limit: s.pageSize, orderBy, where, search: s.globalFilter };
 		},
 		fetch: (vars, signal) => opts.fetchFn(vars, signal),

@@ -26,6 +26,8 @@ import { hlm } from '@spartan-ng/helm/utils';
 import { FlexRender, type ColumnDef, type RowData, type TableFeatures } from '@tanstack/angular-table';
 import { HlmDataGridPagination } from './hlm-data-grid-pagination';
 
+let hlmDataGridNextId = 0;
+
 /**
  * Styled, server-driven data grid. It composes the headless `BrnDataGrid` (state, fetching, sorting,
  * filtering) and renders the toolbar, sortable headers, per-column filters, table, loading, empty
@@ -65,11 +67,11 @@ import { HlmDataGridPagination } from './hlm-data-grid-pagination';
 		@if (showToolbar()) {
 			<div data-slot="data-grid-toolbar" class="flex flex-col gap-2 py-4">
 				<div hlmField class="w-full md:max-w-sm">
-					<label hlmFieldLabel [for]="_searchId()" class="sr-only">{{ searchLabel() }}</label>
+					<label hlmFieldLabel [for]="_searchId" class="sr-only">{{ searchLabel() }}</label>
 					<div data-slot="data-grid-search">
 						<input
 							hlmInput
-							[id]="_searchId()"
+							[id]="_searchId"
 							type="search"
 							[placeholder]="searchPlaceholder()"
 							[attr.aria-label]="searchLabel()"
@@ -309,7 +311,7 @@ import { HlmDataGridPagination } from './hlm-data-grid-pagination';
 					}
 				</thead>
 				<tbody hlmTBody>
-					@if (grid.loading()) {
+					@if (grid.loading() && grid.total() === 0) {
 						<tr hlmTr>
 							<td hlmTd [attr.colSpan]="_colSpan(grid.table)">
 								<hlm-skeleton class="h-8" />
@@ -440,7 +442,8 @@ export class HlmDataGrid<TData extends RowData> {
 
 	protected readonly _cls = computed(() => hlm('w-full', this.class()));
 
-	protected readonly _searchId = computed(() => `data-grid-search`);
+	/** Per-instance search input id: two grids on one page must not share an `id`. */
+	protected readonly _searchId = `data-grid-search-${hlmDataGridNextId++}`;
 
 	private readonly _grid = viewChild.required(BrnDataGrid);
 

@@ -396,6 +396,22 @@ describe('hlm-data-grid sorting', () => {
 		expect(filterLastUrl).toContain('sort=name%3Aasc%2Cemail%3Aasc');
 		expect(el.querySelector('[data-slot="data-grid-sort-index"]')?.textContent).toMatch(/1|2/);
 	});
+
+	it('keeps the loaded rows on screen while a refetch is pending', async () => {
+		const { fixture, el } = await setupFilter();
+		expect(el.textContent).toContain('Ada');
+
+		filterFetchImpl = () => new Promise(() => undefined);
+		const nameTh = Array.from(el.querySelectorAll('thead th')).find((th) =>
+			th.textContent?.includes('Name'),
+		) as HTMLTableCellElement;
+		(nameTh.querySelector('[data-slot="data-grid-sort"]') as HTMLButtonElement).click();
+		fixture.detectChanges();
+
+		expect(el.querySelector('table')?.getAttribute('aria-busy')).toBe('true');
+		expect(el.textContent).toContain('Ada');
+		expect(el.querySelector('hlm-skeleton')).toBeNull();
+	});
 });
 
 describe('hlm-data-grid column filters', () => {
@@ -575,5 +591,19 @@ describe('hlm-data-grid toolbar', () => {
 
 		expect(filterLastUrl).not.toContain('filter%5Bemail%5D');
 		expect(filterLastUrl).not.toContain('q=ada');
+	});
+
+	it('gives each grid search input a unique id for its label', async () => {
+		const first = await setupFilter();
+		const firstInput = first.el.querySelector('[data-slot="data-grid-search"] input') as HTMLInputElement;
+		TestBed.resetTestingModule();
+		const second = await setupFilter();
+		const secondInput = second.el.querySelector('[data-slot="data-grid-search"] input') as HTMLInputElement;
+		TestBed.resetTestingModule();
+
+		expect(firstInput.id).not.toBe('');
+		expect(secondInput.id).not.toBe('');
+		expect(firstInput.id).not.toBe(secondInput.id);
+		expect(first.el.querySelector('[data-slot="data-grid-toolbar"] label')?.getAttribute('for')).toBe(firstInput.id);
 	});
 });

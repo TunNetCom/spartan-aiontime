@@ -69,6 +69,16 @@ describe('graphql variables', () => {
 		});
 		await expect(failing.fetch({ offset: 0, limit: 10 }, new AbortController().signal)).rejects.toThrow('boom');
 	});
+	it('throws for an unknown cursor instead of re-requesting the first page', () => {
+		const cursorAdapter = createGraphQLAdapter<string>({
+			endpoint: '/g',
+			query: 'q',
+			mode: 'cursor',
+			getCursor: () => undefined,
+			fetchFn: async () => ({ rows: [], total: 0 }),
+		});
+		expect(() => cursorAdapter.buildQuery({ page: 2, pageSize: 5, sorting: [], filters: [] })).toThrow();
+	});
 });
 
 describe('graphql where fragments', () => {
