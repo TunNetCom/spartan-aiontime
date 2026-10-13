@@ -414,6 +414,19 @@ describe('BrnColumnFilter advanced', () => {
 		expect(name.hasOption('x')).toBe(false);
 	});
 
+	it('starts a fresh second condition on the first condition operator', async () => {
+		const { filterFor } = await setup();
+		const name = filterFor('name');
+		name.open();
+		name.setOperator('startsWith');
+		name.setValue('b', 1);
+
+		// Pinned: the fresh second inherits `first.operator` (not the `contains` default), so it
+		// stays valid for the column type even when the first moved off the default.
+		expect(name.draft().first).toEqual({ operator: 'startsWith', value: undefined });
+		expect(name.draft().second).toEqual({ operator: 'startsWith', value: 'b' });
+	});
+
 	it('tracks logic and case sensitivity in the draft', async () => {
 		const { filterFor } = await setup();
 		const name = filterFor('name');

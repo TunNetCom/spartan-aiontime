@@ -1,4 +1,5 @@
 import {
+	isFilterGroup,
 	toBrnComparisons,
 	type BrnDataAdapter,
 	type BrnFilter,
@@ -20,10 +21,6 @@ export type GraphQLVariables = {
 const isBlank = (value: unknown) => value === undefined || value === null || value === '';
 
 type FilterWithCase = BrnFilter & { caseSensitive?: boolean };
-
-function isFilterGroup(filter: BrnFilter | BrnFilterGroup): filter is BrnFilterGroup {
-	return 'logic' in filter && 'filters' in filter;
-}
 
 /**
  * Explicit opt-out of the legacy byte-identical output: only `caseSensitive: false` (on the single

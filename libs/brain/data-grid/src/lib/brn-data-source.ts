@@ -213,6 +213,14 @@ export type BrnFilterGroup = {
 	caseSensitive?: boolean;
 };
 
+/**
+ * Narrows a state filter to a two-condition group. Prefer this over an ad-hoc
+ * `'logic' in filter` check so every call site discriminates groups the same way.
+ */
+export function isFilterGroup(filter: BrnFilter | BrnFilterGroup): filter is BrnFilterGroup {
+	return 'logic' in filter && 'filters' in filter;
+}
+
 export function toBrnFilterGroup(
 	id: string,
 	raw: unknown,
@@ -319,7 +327,7 @@ export function brnColumnDefId(def: BrnColumnDefLike): string | undefined {
 /** Turns state filters back into the TanStack column filters the table state expects. */
 export function toColumnFilters(filters: readonly (BrnFilter | BrnFilterGroup)[]): { id: string; value: unknown }[] {
 	return filters.map((filter) =>
-		'logic' in filter && 'filters' in filter
+		isFilterGroup(filter)
 			? {
 					id: filter.id,
 					value: {
@@ -330,7 +338,11 @@ export function toColumnFilters(filters: readonly (BrnFilter | BrnFilterGroup)[]
 						...(filter.caseSensitive ? { caseSensitive: true } : {}),
 					},
 				}
-			: { id: filter.id, value: { operator: filter.operator, value: filter.value } },
+			: // NOTE: a single filter has no `caseSensitive` slot in `BrnFilterSpec`, so a single
+				// carrying the flag loses it on this write path (same as `BrnColumnFilter.apply`).
+				// TODO(data-grid): give single-condition filters a spec slot in a future task and
+				// round-trip the flag here and in `BrnColumnFilter.apply`.
+				{ id: filter.id, value: { operator: filter.operator, value: filter.value } },
 	);
 }
 

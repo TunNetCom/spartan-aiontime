@@ -9,6 +9,7 @@ import {
 	brnDefaultOperatorForType,
 	brnFlattenColumnDefs,
 	isBrnFilterSpec,
+	isFilterGroup,
 	type BrnColumnFilterMeta,
 	type BrnDataAdapter,
 	type BrnFilter,
@@ -774,7 +775,7 @@ export class HlmDataGrid<TData extends RowData> {
 	}
 
 	protected _chipValue(chip: BrnFilter | BrnFilterGroup): string {
-		if ('logic' in chip && 'filters' in chip) {
+		if (isFilterGroup(chip)) {
 			const members = chip.filters
 				.filter((entry): entry is BrnFilter => !!entry)
 				.map((entry) => this._singleChipValue(entry));

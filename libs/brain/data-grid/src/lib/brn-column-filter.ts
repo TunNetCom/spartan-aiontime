@@ -15,7 +15,7 @@ import {
 	type BrnFilterDraft,
 } from './brn-column-filter-draft';
 import { BrnDataGrid } from './brn-data-grid';
-import type { BrnDataGridColumnMeta, BrnFilter, BrnFilterOperator } from './brn-data-source';
+import { isFilterGroup, type BrnDataGridColumnMeta, type BrnFilter, type BrnFilterOperator } from './brn-data-source';
 
 /**
  * The part of a TanStack column the filter control needs. Declared structurally so the directive
@@ -122,7 +122,8 @@ export class BrnColumnFilter {
 	}
 
 	/**
-	 * Sets the single value of one condition. A blank value clears it.
+	 * Sets the single value of one condition. A blank value clears it. A fresh second condition
+	 * starts on the first condition's operator, so it stays valid for the column type.
 	 */
 	public setValue(value: unknown, index: 0 | 1 = 0): void {
 		this._update((draft) =>
@@ -176,6 +177,10 @@ export class BrnColumnFilter {
 	/**
 	 * Opts the draft into (or out of) case-sensitive matching. Only the case-sensitive side is
 	 * written through: text matching stays insensitive unless asked otherwise.
+	 *
+	 * NOTE: a single-condition apply drops the flag — `BrnFilterSpec` has no `caseSensitive` slot,
+	 * so only the group path writes it. TODO(data-grid): give single-condition filters a spec
+	 * slot in a future task instead of dropping the flag silently.
 	 */
 	public setCaseSensitive(sensitive: boolean): void {
 		this._update((draft) => ({ ...draft, caseSensitive: sensitive }));
@@ -190,7 +195,7 @@ export class BrnColumnFilter {
 		const group = brnCompositeToGroup(this.draft(), this.meta()?.type);
 		if (group === undefined) {
 			this.column().setFilterValue(undefined);
-		} else if ('logic' in group && 'filters' in group) {
+		} else if (isFilterGroup(group)) {
 			this.column().setFilterValue({
 				logic: group.logic,
 				conditions: group.filters
@@ -199,6 +204,8 @@ export class BrnColumnFilter {
 				...(group.caseSensitive ? { caseSensitive: true as const } : {}),
 			});
 		} else {
+			// NOTE: singles have no `caseSensitive` slot, so the flag is dropped here (see
+			// `setCaseSensitive`). TODO(data-grid): write it through once a single-spec slot exists.
 			this.column().setFilterValue({ operator: group.operator, value: group.value });
 		}
 		this._grid?.flushFilters();

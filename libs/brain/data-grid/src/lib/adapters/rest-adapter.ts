@@ -1,4 +1,5 @@
 import {
+	isFilterGroup,
 	toBrnComparisons,
 	type BrnDataAdapter,
 	type BrnFilter,
@@ -9,10 +10,6 @@ import {
 
 const isBlank = (value: unknown) => value === undefined || value === null || value === '';
 const text = (value: unknown) => (value instanceof Date ? value.toISOString() : String(value));
-
-function isFilterGroup(filter: BrnFilter | BrnFilterGroup): filter is BrnFilterGroup {
-	return 'logic' in filter && 'filters' in filter;
-}
 
 /**
  * The default REST filter convention: `contains` keeps the plain `filter[id]=value` shape, every other
