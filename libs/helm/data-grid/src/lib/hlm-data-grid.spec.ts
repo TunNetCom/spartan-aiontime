@@ -420,6 +420,35 @@ describe('hlm-data-grid sorting', () => {
 	});
 });
 
+describe('HlmDataGrid header', () => {
+	beforeEach(() => {
+		filterLastUrl = '';
+		filterFetchImpl = async () => ({ rows: FILTER_USERS, total: 2 });
+	});
+	afterEach(() => {
+		TestBed.resetTestingModule();
+	});
+
+	it('shows one filter button per filterable column', async () => {
+		const { el } = await setupFilter();
+
+		// One popover trigger per filterable column: all five columns declare meta.filter.
+		expect(el.querySelectorAll('[data-slot="data-grid-filter-trigger"]').length).toBe(5);
+
+		// The tall inline filter block is gone: no filter root renders inline controls in the
+		// header, and the operator select only exists inside the popover overlay while open.
+		expect(el.querySelectorAll('div[data-slot="data-grid-filter"]').length).toBe(0);
+		expect(el.querySelector('[data-slot="data-grid-filter"] select')).toBeNull();
+	});
+
+	it('renders no filter button for columns without filter metadata', async () => {
+		const { el } = await setup();
+
+		expect(el.querySelectorAll('[data-slot="data-grid-filter-trigger"]').length).toBe(0);
+		expect(el.querySelectorAll('div[data-slot="data-grid-filter"]').length).toBe(0);
+	});
+});
+
 describe('hlm-data-grid column filters', () => {
 	beforeEach(() => {
 		filterLastUrl = '';
