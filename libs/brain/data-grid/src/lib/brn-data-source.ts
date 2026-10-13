@@ -317,8 +317,21 @@ export function brnColumnDefId(def: BrnColumnDefLike): string | undefined {
 }
 
 /** Turns state filters back into the TanStack column filters the table state expects. */
-export function toColumnFilters(filters: readonly BrnFilter[]): { id: string; value: unknown }[] {
-	return filters.map((filter) => ({ id: filter.id, value: { operator: filter.operator, value: filter.value } }));
+export function toColumnFilters(filters: readonly (BrnFilter | BrnFilterGroup)[]): { id: string; value: unknown }[] {
+	return filters.map((filter) =>
+		'logic' in filter && 'filters' in filter
+			? {
+					id: filter.id,
+					value: {
+						logic: filter.logic,
+						conditions: filter.filters
+							.filter((entry): entry is BrnFilter => !!entry)
+							.map((entry) => ({ operator: entry.operator, value: entry.value })),
+						...(filter.caseSensitive ? { caseSensitive: true } : {}),
+					},
+				}
+			: { id: filter.id, value: { operator: filter.operator, value: filter.value } },
+	);
 }
 
 function isEmptyBound(value: unknown): boolean {
@@ -329,7 +342,7 @@ export type BrnGridState = {
 	page: number;
 	pageSize: number;
 	sorting: BrnSort[];
-	filters: BrnFilter[];
+	filters: (BrnFilter | BrnFilterGroup)[];
 	globalFilter?: string;
 };
 

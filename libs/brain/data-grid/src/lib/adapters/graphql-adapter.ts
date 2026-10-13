@@ -54,10 +54,11 @@ export function toGraphQLFilterValue(filter: BrnFilter | BrnFilterGroup): Record
 	if (isFilterGroup(filter)) {
 		const parts = filter.filters
 			.map((entry) => {
+				if (!entry) return undefined;
 				const fragment = toGraphQLSingle(entry, filter);
 				return fragment ? { [entry.id]: fragment } : undefined;
 			})
-			.filter((part): part is Record<string, unknown> => !!part);
+			.filter((part): part is { [field: string]: Record<string, unknown> } => !!part);
 		if (!parts.length) return undefined;
 		return { [filter.logic]: parts };
 	}

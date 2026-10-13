@@ -54,6 +54,7 @@ export function toRestFilterParams(filter: BrnFilter): Record<string, string> {
 export function toRestFilterGroupParams(group: BrnFilterGroup): Record<string, string> {
 	const params: Record<string, string> = { [`filter[${group.id}][logic]`]: group.logic };
 	group.filters.forEach((f, i) => {
+		if (!f) return;
 		for (const [k, v] of Object.entries(toRestFilterParams(f))) {
 			params[k.replace(`filter[${f.id}]`, `filter[${f.id}][${i}]`)] = v;
 		}

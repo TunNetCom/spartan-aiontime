@@ -12,6 +12,7 @@ import {
 	type BrnColumnFilterMeta,
 	type BrnDataAdapter,
 	type BrnFilter,
+	type BrnFilterGroup,
 	type BrnFilterOperator,
 	type BrnFilterSpec,
 	type BrnGridState,
@@ -768,11 +769,21 @@ export class HlmDataGrid<TData extends RowData> {
 		return id;
 	}
 
-	protected _chipLabel(chip: BrnFilter): string {
+	protected _chipLabel(chip: BrnFilter | BrnFilterGroup): string {
 		return this._columnLabel(chip.id);
 	}
 
-	protected _chipValue(chip: BrnFilter): string {
+	protected _chipValue(chip: BrnFilter | BrnFilterGroup): string {
+		if ('logic' in chip && 'filters' in chip) {
+			const members = chip.filters
+				.filter((entry): entry is BrnFilter => !!entry)
+				.map((entry) => this._singleChipValue(entry));
+			return members.join(chip.logic === 'or' ? ' or ' : ' and ');
+		}
+		return this._singleChipValue(chip);
+	}
+
+	private _singleChipValue(chip: BrnFilter): string {
 		const option = (value: unknown) => {
 			const def = brnFlattenColumnDefs(this.columns()).find((entry) => brnColumnDefId(entry) === chip.id);
 			const match = def?.meta?.filter?.options?.find(
@@ -791,7 +802,7 @@ export class HlmDataGrid<TData extends RowData> {
 		return `${operator} ${option(chip.value)}`;
 	}
 
-	protected _removeLabel(chip: BrnFilter): string {
+	protected _removeLabel(chip: BrnFilter | BrnFilterGroup): string {
 		return `Remove ${this._chipLabel(chip)} filter`;
 	}
 
@@ -823,4 +834,8 @@ export const HLM_DATA_GRID_OPERATOR_LABELS: Record<BrnFilterOperator, string> = 
 	in: 'is any of',
 	isEmpty: 'is empty',
 	notEmpty: 'is not empty',
+	notContains: 'does not contain',
+	notEquals: 'is not',
+	isNull: 'is null',
+	notNull: 'is not null',
 };

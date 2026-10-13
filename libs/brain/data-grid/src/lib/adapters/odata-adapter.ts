@@ -57,7 +57,7 @@ function odataLiteral(value: unknown, type?: BrnFilterType): string {
 export function toODataFilterExpression(filter: BrnFilter | BrnFilterGroup): string | undefined {
 	if (isFilterGroup(filter)) {
 		const parts = filter.filters
-			.map((entry) => toODataSingle(entry, filter))
+			.map((entry) => (entry ? toODataSingle(entry, filter) : undefined))
 			.filter((expression): expression is string => !!expression);
 		if (!parts.length) return undefined;
 		return `(${parts.join(` ${filter.logic} `)})`;
@@ -107,7 +107,7 @@ function toODataSingle(filter: BrnFilter, group?: BrnFilterGroup): string | unde
 			if (filter.operator === 'equals' && foldable(filter.value)) {
 				return `${column} eq ${literal(filter.value)}`;
 			}
-			const comparisons = { eq: 'eq', gt: 'gt', gte: 'ge', lt: 'lt', lte: 'le' } as const;
+			const comparisons = { eq: 'eq', ne: 'ne', gt: 'gt', gte: 'ge', lt: 'lt', lte: 'le' } as const;
 			const bounds = (toBrnComparisons(filter) ?? []).map(
 				({ operator, value }) => `${field} ${comparisons[operator]} ${odataLiteral(value, filter.type)}`,
 			);

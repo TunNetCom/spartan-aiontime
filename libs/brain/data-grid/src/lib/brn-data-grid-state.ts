@@ -10,10 +10,11 @@ import {
 import {
 	brnColumnDefId,
 	brnFlattenColumnDefs,
-	toBrnFilter,
+	toBrnFilterGroup,
 	toColumnFilters,
 	type BrnDataAdapter,
 	type BrnFilter,
+	type BrnFilterGroup,
 	type BrnFilterType,
 	type BrnGridState,
 } from './brn-data-source';
@@ -109,11 +110,11 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 	});
 
 	/** The applied filters, resolved to operators (and declared column types) the adapters can map. */
-	const filters = computed<BrnFilter[]>(() => {
+	const filters = computed<(BrnFilter | BrnFilterGroup)[]>(() => {
 		const types = filterTypes();
 		return appliedFilters()
-			.columnFilters.map((filter) => toBrnFilter(filter.id, filter.value, types[filter.id]))
-			.filter((filter): filter is BrnFilter => filter !== undefined);
+			.columnFilters.map((filter) => toBrnFilterGroup(filter.id, filter.value, types[filter.id]))
+			.filter((filter): filter is BrnFilter | BrnFilterGroup => filter !== undefined);
 	});
 	const globalFilter = computed(() => {
 		const value = appliedFilters().globalFilter;
@@ -194,5 +195,16 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 				// state and option shapes, and this function's public signature stays typed.
 			}) as unknown as TableOptions<any, TData>,
 	);
-	return { table, state, query, data, total, loading, error, reload: () => res.reload() };
+	return {
+		table,
+		state,
+		query,
+		data,
+		total,
+		loading,
+		error,
+		reload: () => res.reload(),
+		/** Applies pending filters now instead of after the debounce window, e.g. on an explicit Apply. */
+		flushFilters: () => flushAppliedFilters(true),
+	};
 }

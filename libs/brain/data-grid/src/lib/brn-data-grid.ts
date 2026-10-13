@@ -129,6 +129,14 @@ export class BrnDataGrid<TData extends RowData> implements OnInit {
 		this._assertGrid().reload();
 	}
 
+	/**
+	 * Applies any pending filter changes now, skipping the debounce window, and goes back to the
+	 * first page. Filter controls with an explicit Apply call this so the fetch is immediate.
+	 */
+	public flushFilters(): void {
+		this._assertGrid().flushFilters();
+	}
+
 	private _assertGrid() {
 		if (!this._grid) {
 			throw new Error('BrnDataGrid: the grid is only available from ngOnInit onwards.');
