@@ -152,7 +152,10 @@ const graphqlAdapter = createGraphQLAdapter<DataGridStoryUser>({
 
 const loadingAdapter = createRestAdapter<DataGridStoryUser>({
 	baseUrl: '/api/users',
-	fetchFn: (): Promise<{ rows: DataGridStoryUser[]; total: number }> => new Promise(() => {}),
+	fetchFn: (): Promise<{ rows: DataGridStoryUser[]; total: number }> =>
+		new Promise(() => {
+			/* never resolves — intentional loading state */
+		}),
 });
 
 const emptyAdapter = createRestAdapter<DataGridStoryUser>({
@@ -342,78 +345,6 @@ class Slow3GStory {
 	public readonly columns = columns;
 	public readonly initial = { pageSize: 5 };
 }
-
-const meta: Meta = {
-	title: 'Data Grid',
-	tags: ['autodocs'],
-	decorators: [
-		moduleMetadata({
-			imports: [
-				RestStory,
-				ODataStory,
-				GraphQLStory,
-				LoadingStory,
-				EmptyStory,
-				ErrorStory,
-				Slow3GStory,
-				FilterableStory,
-				SortedStory,
-				CombinedStory,
-			],
-		}),
-	],
-};
-
-export default meta;
-
-export const Rest: StoryObj = {
-	render: () => ({
-		moduleMetadata: { imports: [RestStory] },
-		template: '<data-grid-rest-story/>',
-	}),
-};
-
-export const OData: StoryObj = {
-	render: () => ({
-		moduleMetadata: { imports: [ODataStory] },
-		template: '<data-grid-odata-story/>',
-	}),
-};
-
-export const GraphQL: StoryObj = {
-	render: () => ({
-		moduleMetadata: { imports: [GraphQLStory] },
-		template: '<data-grid-graphql-story/>',
-	}),
-};
-
-export const Loading: StoryObj = {
-	render: () => ({
-		moduleMetadata: { imports: [LoadingStory] },
-		template: '<data-grid-loading-story/>',
-	}),
-};
-
-export const Empty: StoryObj = {
-	render: () => ({
-		moduleMetadata: { imports: [EmptyStory] },
-		template: '<data-grid-empty-story/>',
-	}),
-};
-
-export const ErrorState: StoryObj = {
-	render: () => ({
-		moduleMetadata: { imports: [ErrorStory] },
-		template: '<data-grid-error-story/>',
-	}),
-};
-
-export const Slow3G: StoryObj = {
-	render: () => ({
-		moduleMetadata: { imports: [Slow3GStory] },
-		template: '<data-grid-slow-story/>',
-	}),
-};
 
 export type DataGridFilterableUser = {
 	id: string;
@@ -659,6 +590,78 @@ class CombinedStory {
 		() => `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`,
 	);
 }
+
+const meta: Meta = {
+	title: 'Data Grid',
+	tags: ['autodocs'],
+	decorators: [
+		moduleMetadata({
+			imports: [
+				RestStory,
+				ODataStory,
+				GraphQLStory,
+				LoadingStory,
+				EmptyStory,
+				ErrorStory,
+				Slow3GStory,
+				FilterableStory,
+				SortedStory,
+				CombinedStory,
+			],
+		}),
+	],
+};
+
+export default meta;
+
+export const Rest: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [RestStory] },
+		template: '<data-grid-rest-story/>',
+	}),
+};
+
+export const OData: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [ODataStory] },
+		template: '<data-grid-odata-story/>',
+	}),
+};
+
+export const GraphQL: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [GraphQLStory] },
+		template: '<data-grid-graphql-story/>',
+	}),
+};
+
+export const Loading: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [LoadingStory] },
+		template: '<data-grid-loading-story/>',
+	}),
+};
+
+export const Empty: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [EmptyStory] },
+		template: '<data-grid-empty-story/>',
+	}),
+};
+
+export const ErrorState: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [ErrorStory] },
+		template: '<data-grid-error-story/>',
+	}),
+};
+
+export const Slow3G: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [Slow3GStory] },
+		template: '<data-grid-slow-story/>',
+	}),
+};
 
 export const WithFilters: StoryObj = {
 	render: () => ({
