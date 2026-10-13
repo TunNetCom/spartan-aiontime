@@ -1,23 +1,24 @@
-import { Component, computed } from '@angular/core';
+import { Component, computed, viewChild } from '@angular/core';
 import { faker } from '@faker-js/faker';
 import {
 	createGraphQLAdapter,
 	createODataAdapter,
 	createRestAdapter,
-	injectBrnDataGrid,
-	type GraphQLVariables,
+	type BrnDataGridColumnMeta,
+	type BrnFilter,
 } from '@spartan-ng/brain/data-grid';
 import { HlmButtonImports } from '@spartan-ng/helm/button';
-import { HlmDataGridImports } from '@spartan-ng/helm/data-grid';
+import { HlmDataGrid } from '@spartan-ng/helm/data-grid';
 import { HlmInputImports } from '@spartan-ng/helm/input';
-import { HlmTableImports } from '@spartan-ng/helm/table';
 import type { Meta, StoryObj } from '@storybook/angular';
 import { moduleMetadata } from '@storybook/angular';
 import {
 	columnFilteringFeature,
 	columnVisibilityFeature,
 	createColumnHelper,
-	FlexRender,
+	filterFn_includesString,
+	filterFn_weakEquals,
+	globalFilteringFeature,
 	rowPaginationFeature,
 	rowSelectionFeature,
 	rowSortingFeature,
@@ -51,6 +52,9 @@ const features = tableFeatures({
 	rowPaginationFeature,
 	rowSelectionFeature,
 	rowSortingFeature,
+	// v9 resolves filter functions by name from this registry, and picks `weakEquals` before the first
+	// page of rows arrives, so both the string and the empty-table fallback are registered.
+	filterFns: { includesString: filterFn_includesString, weakEquals: filterFn_weakEquals },
 });
 
 const columnHelper = createColumnHelper<typeof features, DataGridStoryUser>();
@@ -109,6 +113,7 @@ const restAdapter = createRestAdapter<DataGridStoryUser>({
 
 const odataAdapter = createODataAdapter<DataGridStoryUser>({
 	baseUrl: '/odata/Users',
+	globalFilterFields: ['email'],
 	fetchFn: async (url, signal) => {
 		signal.throwIfAborted();
 		const params = new URLSearchParams(url.split('?')[1] ?? '');
@@ -129,7 +134,7 @@ const graphqlAdapter = createGraphQLAdapter<DataGridStoryUser>({
 	endpoint: '/graphql',
 	query:
 		'query Users($offset: Int, $limit: Int, $orderBy: [UserOrder!], $where: UserFilter, $search: String) { users { rows total } }',
-	fetchFn: async (vars: GraphQLVariables, signal) => {
+	fetchFn: async (vars, signal) => {
 		signal.throwIfAborted();
 		const offset = vars.offset ?? 0;
 		const limit = vars.limit ?? vars.first ?? 5;
@@ -177,195 +182,165 @@ const slowAdapter = createRestAdapter<DataGridStoryUser>({
 	},
 });
 
-const gridMarkup = `
-		<hlm-data-grid [loading]="_grid.loading()" [error]="_grid.error()" [total]="_grid.total()" [retry]="_grid.reload">
-			<thead>
-				@for (headerGroup of _grid.table.getHeaderGroups(); track headerGroup.id) {
-					<tr hlmTr>
-						@for (header of headerGroup.headers; track header.id) {
-							<th hlmTh [attr.colSpan]="header.colSpan">
-								@if (!header.isPlaceholder) {
-									<ng-container
-										*flexRender="header.column.columnDef.header; props: header.getContext(); let headerText"
-									>
-										<div [innerHTML]="headerText"></div>
-									</ng-container>
-								}
-							</th>
-						}
-					</tr>
-				}
-			</thead>
-			@for (row of _grid.table.getRowModel().rows; track row.id) {
-				<tr hlmTr>
-					@for (cell of row.getVisibleCells(); track cell.id) {
-						<td hlmTd>
-							<ng-container *flexRender="cell.column.columnDef.cell; props: cell.getContext(); let cellText">
-								<div [innerHTML]="cellText"></div>
-							</ng-container>
-						</td>
-					}
-				</tr>
-			}
-		</hlm-data-grid>
-		<hlm-data-grid-pagination [table]="_grid.table" />
-	`;
-
-const filterChrome = `
+@Component({
+	selector: 'data-grid-rest-story',
+	imports: [HlmDataGrid, HlmInputImports, HlmButtonImports],
+	host: { class: 'block w-full' },
+	template: `
 		<div class="flex flex-col gap-2 py-4 sm:flex-row sm:items-center">
 			<input hlmInput class="w-full md:max-w-sm" placeholder="Filter emails..." (input)="_filterChanged($event)" />
 			<button hlmBtn variant="outline" size="sm" (click)="_toggleEmailSort()">Sort by email {{ _sortLabel() }}</button>
 		</div>
-		<p class="text-muted-foreground font-mono text-xs break-all">{{ _queryDisplay() }}</p>
-	`;
-
-const interactiveTemplate = filterChrome + gridMarkup;
-
-@Component({
-	selector: 'data-grid-rest-story',
-	standalone: true,
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmInputImports, HlmButtonImports],
-	host: { class: 'w-full' },
-	template: interactiveTemplate,
+		<p class="text-muted-foreground font-mono text-xs break-all">GET {{ _queryString() }}</p>
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
 })
 class RestStory {
-	protected readonly _grid = injectBrnDataGrid<DataGridStoryUser>({
-		adapter: restAdapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
-	protected readonly _queryDisplay = computed(
-		() => `GET /api/users?${new URLSearchParams(this._grid.query()).toString()}`,
+	public readonly adapter = restAdapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+
+	protected readonly _queryString = computed(
+		() => `/api/users?${new URLSearchParams(restAdapter.buildQuery(this._grid().state())).toString()}`,
 	);
+
 	protected readonly _sortLabel = computed(() => {
-		const sort = this._grid.table.getColumn('email')?.getIsSorted();
+		const sort = this._grid().table.getColumn('email')?.getIsSorted();
 		return sort === 'desc' ? '↓' : sort === 'asc' ? '↑' : '↕';
 	});
+
 	protected _filterChanged(event: Event) {
-		this._grid.table.getColumn('email')?.setFilterValue((event.target as HTMLInputElement).value);
+		this._grid()
+			.table.getColumn('email')
+			?.setFilterValue((event.target as HTMLInputElement).value);
 	}
+
 	protected _toggleEmailSort() {
-		this._grid.table.getColumn('email')?.toggleSorting();
+		this._grid().table.getColumn('email')?.toggleSorting();
 	}
 }
 
 @Component({
 	selector: 'data-grid-odata-story',
-	standalone: true,
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmInputImports, HlmButtonImports],
-	host: { class: 'w-full' },
-	template: interactiveTemplate,
+	imports: [HlmDataGrid, HlmInputImports, HlmButtonImports],
+	host: { class: 'block w-full' },
+	template: `
+		<div class="flex items-center gap-2 py-4">
+			<input hlmInput class="w-full md:max-w-sm" placeholder="Filter emails..." (input)="_filterChanged($event)" />
+		</div>
+		<p class="text-muted-foreground font-mono text-xs break-all">GET /odata/Users?{{ _query() }}</p>
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
 })
 class ODataStory {
-	protected readonly _grid = injectBrnDataGrid<DataGridStoryUser>({
-		adapter: odataAdapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
-	protected readonly _queryDisplay = computed(() => `GET /odata/Users?${this._grid.query()}`);
-	protected readonly _sortLabel = computed(() => {
-		const sort = this._grid.table.getColumn('email')?.getIsSorted();
-		return sort === 'desc' ? '↓' : sort === 'asc' ? '↑' : '↕';
-	});
+	public readonly adapter = odataAdapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+
+	protected readonly _query = computed(() => odataAdapter.buildQuery(this._grid().state()));
+
 	protected _filterChanged(event: Event) {
-		this._grid.table.getColumn('email')?.setFilterValue((event.target as HTMLInputElement).value);
-	}
-	protected _toggleEmailSort() {
-		this._grid.table.getColumn('email')?.toggleSorting();
+		this._grid()
+			.table.getColumn('email')
+			?.setFilterValue((event.target as HTMLInputElement).value);
 	}
 }
 
 @Component({
 	selector: 'data-grid-graphql-story',
-	standalone: true,
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmInputImports, HlmButtonImports],
-	host: { class: 'w-full' },
-	template: interactiveTemplate,
+	imports: [HlmDataGrid, HlmInputImports],
+	host: { class: 'block w-full' },
+	template: `
+		<div class="flex items-center gap-2 py-4">
+			<input hlmInput class="w-full md:max-w-sm" placeholder="Filter emails..." (input)="_filterChanged($event)" />
+		</div>
+		<pre class="text-muted-foreground overflow-x-auto font-mono text-xs">{{ _variables() }}</pre>
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
 })
 class GraphQLStory {
-	protected readonly _grid = injectBrnDataGrid<DataGridStoryUser>({
-		adapter: graphqlAdapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
-	protected readonly _queryDisplay = computed(() => `vars ${JSON.stringify(this._grid.query())}`);
-	protected readonly _sortLabel = computed(() => {
-		const sort = this._grid.table.getColumn('email')?.getIsSorted();
-		return sort === 'desc' ? '↓' : sort === 'asc' ? '↑' : '↕';
-	});
+	public readonly adapter = graphqlAdapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+
+	protected readonly _variables = computed(() =>
+		JSON.stringify(graphqlAdapter.buildQuery(this._grid().state()), null, 2),
+	);
+
 	protected _filterChanged(event: Event) {
-		this._grid.table.getColumn('email')?.setFilterValue((event.target as HTMLInputElement).value);
-	}
-	protected _toggleEmailSort() {
-		this._grid.table.getColumn('email')?.toggleSorting();
+		this._grid()
+			.table.getColumn('email')
+			?.setFilterValue((event.target as HTMLInputElement).value);
 	}
 }
 
 @Component({
 	selector: 'data-grid-loading-story',
-	standalone: true,
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmButtonImports],
-	host: { class: 'w-full' },
-	template: gridMarkup,
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
 })
 class LoadingStory {
-	protected readonly _grid = injectBrnDataGrid<DataGridStoryUser>({
-		adapter: loadingAdapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
+	public readonly adapter = loadingAdapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
 }
 
 @Component({
 	selector: 'data-grid-empty-story',
-	standalone: true,
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmButtonImports],
-	host: { class: 'w-full' },
-	template: gridMarkup,
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
 })
 class EmptyStory {
-	protected readonly _grid = injectBrnDataGrid<DataGridStoryUser>({
-		adapter: emptyAdapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
+	public readonly adapter = emptyAdapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
 }
 
 @Component({
 	selector: 'data-grid-error-story',
-	standalone: true,
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmButtonImports],
-	host: { class: 'w-full' },
-	template: gridMarkup,
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
 })
 class ErrorStory {
-	protected readonly _grid = injectBrnDataGrid<DataGridStoryUser>({
-		adapter: errorAdapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
+	public readonly adapter = errorAdapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
 }
 
 @Component({
 	selector: 'data-grid-slow-story',
-	standalone: true,
-	imports: [FlexRender, HlmDataGridImports, HlmTableImports, HlmButtonImports],
-	host: { class: 'w-full' },
-	template: gridMarkup,
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
 })
 class Slow3GStory {
-	protected readonly _grid = injectBrnDataGrid<DataGridStoryUser>({
-		adapter: slowAdapter,
-		initial: { pageSize: 5 },
-		features,
-		columns,
-	});
+	public readonly adapter = slowAdapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	public readonly initial = { pageSize: 5 };
 }
 
 const meta: Meta = {
@@ -373,7 +348,18 @@ const meta: Meta = {
 	tags: ['autodocs'],
 	decorators: [
 		moduleMetadata({
-			imports: [RestStory, ODataStory, GraphQLStory, LoadingStory, EmptyStory, ErrorStory, Slow3GStory],
+			imports: [
+				RestStory,
+				ODataStory,
+				GraphQLStory,
+				LoadingStory,
+				EmptyStory,
+				ErrorStory,
+				Slow3GStory,
+				FilterableStory,
+				SortedStory,
+				CombinedStory,
+			],
 		}),
 	],
 };
@@ -426,5 +412,271 @@ export const Slow3G: StoryObj = {
 	render: () => ({
 		moduleMetadata: { imports: [Slow3GStory] },
 		template: '<data-grid-slow-story/>',
+	}),
+};
+
+export type DataGridFilterableUser = {
+	id: string;
+	name: string;
+	email: string;
+	age: number;
+	active: boolean;
+	status: string;
+	created: string;
+};
+
+const STATUSES = ['open', 'closed', 'pending'] as const;
+
+const FILTERABLE_USERS: DataGridFilterableUser[] = Array.from({ length: 42 }, (_, index) => ({
+	id: faker.string.uuid(),
+	name: faker.person.fullName(),
+	email: faker.internet.email(),
+	age: faker.number.int({ min: 18, max: 80 }),
+	active: index % 2 === 0,
+	status: STATUSES[index % STATUSES.length],
+	created: faker.date.past({ years: 2 }).toISOString().slice(0, 10),
+}));
+
+const filterableFeatures = tableFeatures({
+	columnFilteringFeature,
+	columnVisibilityFeature,
+	globalFilteringFeature,
+	rowPaginationFeature,
+	rowSelectionFeature,
+	rowSortingFeature,
+	// Same fallback registration as the basic stories: v9 picks `weakEquals` before rows arrive.
+	filterFns: { includesString: filterFn_includesString, weakEquals: filterFn_weakEquals },
+});
+
+const filterableColumnHelper = createColumnHelper<typeof filterableFeatures, DataGridFilterableUser>();
+
+const filterableColumns = [
+	filterableColumnHelper.accessor('name', {
+		id: 'name',
+		header: 'Name',
+		cell: (info) => info.getValue<string>(),
+		meta: { filter: { type: 'string', label: 'Name' } } as BrnDataGridColumnMeta,
+	}),
+	filterableColumnHelper.accessor('email', {
+		id: 'email',
+		header: 'Email',
+		cell: (info) => `<div class="lowercase">${info.getValue<string>()}</div>`,
+		meta: { filter: { type: 'string', label: 'Email' } } as BrnDataGridColumnMeta,
+	}),
+	filterableColumnHelper.accessor('age', {
+		id: 'age',
+		header: 'Age',
+		cell: (info) => String(info.getValue<number>()),
+		meta: { filter: { type: 'number', label: 'Age' } } as BrnDataGridColumnMeta,
+	}),
+	filterableColumnHelper.accessor('created', {
+		id: 'created',
+		header: 'Created',
+		cell: (info) => info.getValue<string>(),
+		meta: { filter: { type: 'date', label: 'Created' } } as BrnDataGridColumnMeta,
+	}),
+	filterableColumnHelper.accessor('active', {
+		id: 'active',
+		header: 'Active',
+		cell: (info) => String(info.getValue<boolean>()),
+		meta: { filter: { type: 'boolean', label: 'Active' } } as BrnDataGridColumnMeta,
+	}),
+	filterableColumnHelper.accessor('status', {
+		id: 'status',
+		header: 'Status',
+		cell: (info) => info.getValue<string>(),
+		meta: {
+			filter: {
+				type: 'select',
+				label: 'Status',
+				options: [
+					{ label: 'Open', value: 'open' },
+					{ label: 'Closed', value: 'closed' },
+					{ label: 'Pending', value: 'pending' },
+				],
+			},
+		} as BrnDataGridColumnMeta,
+	}),
+];
+
+/** Number-aware comparison so range/equals filters work for ages and ISO dates alike. */
+const compareFilterable = (field: unknown, value: string): number => {
+	const left = Number(field);
+	const right = Number(value);
+	if (field !== '' && value !== '' && !Number.isNaN(left) && !Number.isNaN(right)) return left - right;
+	return String(field ?? '').localeCompare(String(value));
+};
+
+const matchFilterable = (row: DataGridFilterableUser, id: string, op: string, value: string): boolean => {
+	const field = row[id as keyof DataGridFilterableUser];
+	switch (op) {
+		case 'contains':
+			return String(field ?? '')
+				.toLowerCase()
+				.includes(value.toLowerCase());
+		case 'equals':
+			return String(field ?? '') === value;
+		case 'startsWith':
+			return String(field ?? '')
+				.toLowerCase()
+				.startsWith(value.toLowerCase());
+		case 'endsWith':
+			return String(field ?? '')
+				.toLowerCase()
+				.endsWith(value.toLowerCase());
+		case 'gt':
+			return compareFilterable(field, value) > 0;
+		case 'gte':
+			return compareFilterable(field, value) >= 0;
+		case 'lt':
+			return compareFilterable(field, value) < 0;
+		case 'lte':
+			return compareFilterable(field, value) <= 0;
+		case 'in':
+			return value.split(',').includes(String(field));
+		case 'isEmpty':
+			return field === undefined || field === null || field === '';
+		case 'notEmpty':
+			return !(field === undefined || field === null || field === '');
+		default:
+			return true;
+	}
+};
+
+const filterableAdapter = createRestAdapter<DataGridFilterableUser>({
+	baseUrl: '/api/users',
+	fetchFn: async (url, signal) => {
+		signal.throwIfAborted();
+		const params = new URLSearchParams(url.split('?')[1] ?? '');
+		const page = Number(params.get('page') ?? '1') - 1;
+		const pageSize = Number(params.get('pageSize') ?? '5');
+		const term = (params.get('q') ?? '').trim().toLowerCase();
+		const sortList = (params.get('sort') ?? '')
+			.split(',')
+			.filter(Boolean)
+			.map((entry) => {
+				const [id, dir] = entry.split(':');
+				return { id, desc: dir === 'desc' };
+			});
+		const sorts =
+			sortList.length > 0
+				? sortList
+				: params.get('sortBy')
+					? [{ id: params.get('sortBy') ?? '', desc: params.get('sortDir') === 'desc' }]
+					: [];
+		let rows = FILTERABLE_USERS.filter((row) => {
+			if (term && ![row.name, row.email, row.status].some((v) => v.toLowerCase().includes(term))) return false;
+			for (const [key, value] of params) {
+				const match = key.match(/^filter\[(.+?)\](?:\[(.+?)\])?$/);
+				if (match && !matchFilterable(row, match[1], match[2] ?? 'contains', value)) return false;
+			}
+			return true;
+		});
+		for (const sort of sorts.reverse()) {
+			rows = [...rows].sort((a, b) => {
+				const left = a[sort.id as keyof DataGridFilterableUser];
+				const right = b[sort.id as keyof DataGridFilterableUser];
+				const compared = compareFilterable(left, String(right ?? ''));
+				return sort.desc ? -compared : compared;
+			});
+		}
+		return { rows: rows.slice(page * pageSize, page * pageSize + pageSize), total: rows.length };
+	},
+});
+
+@Component({
+	selector: 'data-grid-filterable-story',
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<p class="text-muted-foreground font-mono text-xs break-all">GET {{ _queryString() }}</p>
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
+})
+class FilterableStory {
+	public readonly adapter = filterableAdapter;
+	public readonly features = filterableFeatures;
+	public readonly columns = filterableColumns;
+	public readonly initial = { pageSize: 5 };
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+
+	protected readonly _queryString = computed(
+		() => `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`,
+	);
+}
+
+@Component({
+	selector: 'data-grid-sorted-story',
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<p class="text-muted-foreground font-mono text-xs break-all">GET {{ _queryString() }}</p>
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
+})
+class SortedStory {
+	public readonly adapter = filterableAdapter;
+	public readonly features = filterableFeatures;
+	public readonly columns = filterableColumns;
+	public readonly initial = { pageSize: 5, sorting: [{ id: 'email', desc: false }] };
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+
+	protected readonly _queryString = computed(
+		() => `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`,
+	);
+}
+
+const COMBINED_FILTERS: BrnFilter[] = [
+	{ id: 'email', value: 'example', operator: 'contains', type: 'string' },
+	{ id: 'age', value: [20, 60], operator: 'between', type: 'number' },
+];
+
+@Component({
+	selector: 'data-grid-combined-story',
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<p class="text-muted-foreground font-mono text-xs break-all">GET {{ _queryString() }}</p>
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
+})
+class CombinedStory {
+	public readonly adapter = filterableAdapter;
+	public readonly features = filterableFeatures;
+	public readonly columns = filterableColumns;
+	public readonly initial = {
+		pageSize: 5,
+		sorting: [{ id: 'age', desc: true }],
+		filters: COMBINED_FILTERS,
+		globalFilter: 'open',
+	};
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+
+	protected readonly _queryString = computed(
+		() => `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`,
+	);
+}
+
+export const WithFilters: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [FilterableStory] },
+		template: '<data-grid-filterable-story/>',
+	}),
+};
+
+export const Sorted: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [SortedStory] },
+		template: '<data-grid-sorted-story/>',
+	}),
+};
+
+export const Combined: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [CombinedStory] },
+		template: '<data-grid-combined-story/>',
 	}),
 };
