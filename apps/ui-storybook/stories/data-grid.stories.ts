@@ -206,13 +206,22 @@ class RestStory {
 
 	private readonly _grid = viewChild.required(HlmDataGrid);
 
-	protected readonly _queryString = computed(
-		() => `/api/users?${new URLSearchParams(restAdapter.buildQuery(this._grid().state())).toString()}`,
-	);
+	protected readonly _queryString = computed(() => {
+		try {
+			return `/api/users?${new URLSearchParams(restAdapter.buildQuery(this._grid().state())).toString()}`;
+		} catch {
+			// The child grid only exists after view init; show a placeholder until then.
+			return '/api/users?…';
+		}
+	});
 
 	protected readonly _sortLabel = computed(() => {
-		const sort = this._grid().table.getColumn('email')?.getIsSorted();
-		return sort === 'desc' ? '↓' : sort === 'asc' ? '↑' : '↕';
+		try {
+			const sort = this._grid().table.getColumn('email')?.getIsSorted();
+			return sort === 'desc' ? '↓' : sort === 'asc' ? '↑' : '↕';
+		} catch {
+			return '↕';
+		}
 	});
 
 	protected _filterChanged(event: Event) {
@@ -246,7 +255,14 @@ class ODataStory {
 
 	private readonly _grid = viewChild.required(HlmDataGrid);
 
-	protected readonly _query = computed(() => odataAdapter.buildQuery(this._grid().state()));
+	protected readonly _query = computed(() => {
+		try {
+			return odataAdapter.buildQuery(this._grid().state());
+		} catch {
+			// The child grid only exists after view init; show a placeholder until then.
+			return '';
+		}
+	});
 
 	protected _filterChanged(event: Event) {
 		this._grid()
@@ -275,9 +291,14 @@ class GraphQLStory {
 
 	private readonly _grid = viewChild.required(HlmDataGrid);
 
-	protected readonly _variables = computed(() =>
-		JSON.stringify(graphqlAdapter.buildQuery(this._grid().state()), null, 2),
-	);
+	protected readonly _variables = computed(() => {
+		try {
+			return JSON.stringify(graphqlAdapter.buildQuery(this._grid().state()), null, 2);
+		} catch {
+			// The child grid only exists after view init; show a placeholder until then.
+			return '{}';
+		}
+	});
 
 	protected _filterChanged(event: Event) {
 		this._grid()
@@ -532,9 +553,14 @@ class FilterableStory {
 
 	private readonly _grid = viewChild.required(HlmDataGrid);
 
-	protected readonly _queryString = computed(
-		() => `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`,
-	);
+	protected readonly _queryString = computed(() => {
+		try {
+			return `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`;
+		} catch {
+			// The child grid only exists after view init; show a placeholder until then.
+			return '/api/users?…';
+		}
+	});
 }
 
 @Component({
@@ -554,9 +580,14 @@ class SortedStory {
 
 	private readonly _grid = viewChild.required(HlmDataGrid);
 
-	protected readonly _queryString = computed(
-		() => `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`,
-	);
+	protected readonly _queryString = computed(() => {
+		try {
+			return `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`;
+		} catch {
+			// The child grid only exists after view init; show a placeholder until then.
+			return '/api/users?…';
+		}
+	});
 }
 
 const COMBINED_FILTERS: BrnFilter[] = [
@@ -586,9 +617,14 @@ class CombinedStory {
 
 	private readonly _grid = viewChild.required(HlmDataGrid);
 
-	protected readonly _queryString = computed(
-		() => `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`,
-	);
+	protected readonly _queryString = computed(() => {
+		try {
+			return `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(this._grid().state())).toString()}`;
+		} catch {
+			// The child grid only exists after view init; show a placeholder until then.
+			return '/api/users?…';
+		}
+	});
 }
 
 const meta: Meta = {
