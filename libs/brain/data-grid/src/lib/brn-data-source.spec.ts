@@ -8,6 +8,7 @@ import {
 	isBrnFilterSpec,
 	toBrnComparisons,
 	toBrnFilter,
+	toBrnFilterGroup,
 	toColumnFilters,
 	type BrnFilter,
 } from './brn-data-source';
@@ -160,9 +161,19 @@ describe('BRN_FILTER_OPERATORS', () => {
 	it('offers text operators only for text columns and ranges for ordered types', () => {
 		expect(BRN_FILTER_OPERATORS.string).toContain('contains');
 		expect(BRN_FILTER_OPERATORS.string).not.toContain('gte');
-		expect(BRN_FILTER_OPERATORS.number).toEqual(['equals', 'gt', 'gte', 'lt', 'lte', 'between']);
+		expect(BRN_FILTER_OPERATORS.number).toEqual([
+			'equals',
+			'gt',
+			'gte',
+			'lt',
+			'lte',
+			'between',
+			'notEquals',
+			'isNull',
+			'notNull',
+		]);
 		expect(BRN_FILTER_OPERATORS.date).toContain('between');
-		expect(BRN_FILTER_OPERATORS.boolean).toEqual(['equals']);
+		expect(BRN_FILTER_OPERATORS.boolean).toEqual(['equals', 'notEquals', 'isNull', 'notNull']);
 		expect(BRN_FILTER_OPERATORS.select).toContain('in');
 	});
 });
@@ -253,5 +264,22 @@ describe('brnFlattenColumnDefs', () => {
 			{ id: 'group', columns: [{ accessorKey: 'age' }, { id: 'nested', columns: [{ id: 'email' }] }] },
 		]);
 		expect(leaves.map((leaf) => leaf.id ?? leaf.accessorKey)).toEqual(['name', 'age', 'email']);
+	});
+});
+
+describe('toBrnFilterGroup', () => {
+	it('joins two conditions with or', () => {
+		const group = toBrnFilterGroup(
+			'name',
+			{
+				logic: 'or',
+				conditions: [
+					{ operator: 'contains', value: 'a' },
+					{ operator: 'contains', value: 'b' },
+				],
+			},
+			'string',
+		);
+		expect(group).toMatchObject({ id: 'name', logic: 'or' });
 	});
 });

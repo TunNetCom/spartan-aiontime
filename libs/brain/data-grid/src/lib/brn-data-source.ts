@@ -5,7 +5,9 @@ export type BrnSort = { id: string; desc: boolean };
  */
 export type BrnFilterOperator =
 	| 'contains'
+	| 'notContains'
 	| 'equals'
+	| 'notEquals'
 	| 'startsWith'
 	| 'endsWith'
 	| 'gt'
@@ -15,7 +17,9 @@ export type BrnFilterOperator =
 	| 'between'
 	| 'in'
 	| 'isEmpty'
-	| 'notEmpty';
+	| 'notEmpty'
+	| 'isNull'
+	| 'notNull';
 
 /**
  * The kind of value a column holds. It picks the operators offered for that column, tells the helm
@@ -28,11 +32,22 @@ export type BrnFilterType = 'string' | 'number' | 'date' | 'boolean' | 'select';
  * numeric and date ranges, and `contains`/`startsWith`/`endsWith` only make sense for text.
  */
 export const BRN_FILTER_OPERATORS: Record<BrnFilterType, readonly BrnFilterOperator[]> = {
-	string: ['contains', 'equals', 'startsWith', 'endsWith', 'isEmpty', 'notEmpty'],
-	number: ['equals', 'gt', 'gte', 'lt', 'lte', 'between'],
-	date: ['equals', 'gt', 'gte', 'lt', 'lte', 'between'],
-	boolean: ['equals'],
-	select: ['in', 'equals', 'isEmpty', 'notEmpty'],
+	string: [
+		'contains',
+		'equals',
+		'startsWith',
+		'endsWith',
+		'isEmpty',
+		'notEmpty',
+		'notContains',
+		'notEquals',
+		'isNull',
+		'notNull',
+	],
+	number: ['equals', 'gt', 'gte', 'lt', 'lte', 'between', 'notEquals', 'isNull', 'notNull'],
+	date: ['equals', 'gt', 'gte', 'lt', 'lte', 'between', 'notEquals', 'isNull', 'notNull'],
+	boolean: ['equals', 'notEquals', 'isNull', 'notNull'],
+	select: ['in', 'equals', 'isEmpty', 'notEmpty', 'notEquals', 'isNull', 'notNull'],
 };
 
 /**
@@ -153,7 +168,12 @@ export function toBrnFilter(id: string, raw: unknown, type?: BrnFilterType): Brn
 
 	// Emptiness checks are only real when a control asked for them by name; a bare empty value is a
 	// cleared input, not an `isEmpty` filter.
-	if (spec?.operator === 'isEmpty' || spec?.operator === 'notEmpty') {
+	if (
+		spec?.operator === 'isEmpty' ||
+		spec?.operator === 'notEmpty' ||
+		spec?.operator === 'isNull' ||
+		spec?.operator === 'notNull'
+	) {
 		return typed({ id, value: undefined, operator: spec.operator });
 	}
 	if (isEmptyBound(value)) return undefined;
@@ -179,8 +199,46 @@ export function toBrnFilter(id: string, raw: unknown, type?: BrnFilterType): Brn
 	return scalar === undefined ? undefined : typed({ id, value: scalar, operator });
 }
 
+export type BrnFilterCondition = { operator?: BrnFilterOperator; value?: unknown };
+export type BrnCompositeSpec = {
+	logic: 'and' | 'or';
+	conditions: [BrnFilterCondition, BrnFilterCondition?];
+	caseSensitive?: boolean;
+};
+export type BrnFilterGroup = {
+	id: string;
+	logic: 'and' | 'or';
+	filters: [BrnFilter, BrnFilter?];
+	type?: BrnFilterType;
+	caseSensitive?: boolean;
+};
+
+export function toBrnFilterGroup(
+	id: string,
+	raw: unknown,
+	type?: BrnFilterType,
+): BrnFilter | BrnFilterGroup | undefined {
+	if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && 'conditions' in raw) {
+		const spec = raw as BrnCompositeSpec;
+		const [c1, c2] = spec.conditions;
+		const f1 = toBrnFilter(id, c1, type);
+		const f2 = c2 ? toBrnFilter(id, c2, type) : undefined;
+		if (!f1 && !f2) return undefined;
+		if (f1 && !f2) return f1;
+		const filters = [f1, f2].filter((f): f is BrnFilter => !!f);
+		return {
+			id,
+			logic: spec.logic ?? 'and',
+			filters: filters as [BrnFilter, BrnFilter?],
+			...(type ? { type } : {}),
+			...(spec.caseSensitive ? { caseSensitive: true } : {}),
+		};
+	}
+	return toBrnFilter(id, raw, type);
+}
+
 /** A single bound an adapter writes: `field <operator> value`. */
-export type BrnComparison = { operator: 'eq' | 'gt' | 'gte' | 'lt' | 'lte'; value: unknown };
+export type BrnComparison = { operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte'; value: unknown };
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -221,6 +279,8 @@ export function toBrnComparisons(filter: BrnFilter): BrnComparison[] | undefined
 	switch (filter.operator) {
 		case 'equals':
 			return bound('eq', filter.value);
+		case 'notEquals':
+			return bound('ne', filter.value);
 		case 'gt':
 		case 'gte':
 		case 'lt':
