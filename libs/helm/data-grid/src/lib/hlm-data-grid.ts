@@ -379,6 +379,7 @@ export class HlmDataGrid<TData extends RowData> {
 		all: this.allText(),
 		true: this.trueText(),
 		false: this.falseText(),
+		operatorLabels: this._operatorLabels(),
 	}));
 
 	private readonly _grid = viewChild.required(BrnDataGrid);

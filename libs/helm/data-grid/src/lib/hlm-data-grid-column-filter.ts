@@ -38,6 +38,7 @@ const HLM_DATA_GRID_FILTER_LABEL_DEFAULTS: Required<HlmDataGridFilterLabels> = {
 	all: 'All',
 	true: 'True',
 	false: 'False',
+	operatorLabels: HLM_DATA_GRID_OPERATOR_LABELS,
 };
 
 /**
@@ -321,6 +322,13 @@ export class HlmDataGridColumnFilter {
 	public readonly labels = input<HlmDataGridFilterLabels>({});
 
 	/**
+	 * Display names of the filter operators, merged over `HLM_DATA_GRID_OPERATOR_LABELS`. The grid
+	 * passes its `operatorLabels` through the `labels` input; override this to localize a standalone
+	 * popover. A key set here wins over one carried on `labels`.
+	 */
+	public readonly operatorLabels = input<Partial<Record<BrnFilterOperator, string>>>({});
+
+	/**
 	 * Extra classes applied to the host.
 	 */
 	public readonly class = input('');
@@ -362,7 +370,12 @@ export class HlmDataGridColumnFilter {
 	}
 
 	protected _operatorLabel(operator: BrnFilterOperator): string {
-		return HLM_DATA_GRID_OPERATOR_LABELS[operator] ?? operator;
+		const labels = {
+			...HLM_DATA_GRID_OPERATOR_LABELS,
+			...this._labels().operatorLabels,
+			...this.operatorLabels(),
+		};
+		return labels[operator] ?? operator;
 	}
 
 	protected _metaType(): BrnFilterType | undefined {

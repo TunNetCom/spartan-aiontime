@@ -22,6 +22,12 @@ export type HlmDataGridFilterLabels = {
 	all?: string;
 	true?: string;
 	false?: string;
+	/**
+	 * Display names of the filter operators, merged over `HLM_DATA_GRID_OPERATOR_LABELS`. The grid
+	 * passes its `operatorLabels` input through here; a standalone popover can also set the
+	 * component's own `operatorLabels` input.
+	 */
+	operatorLabels?: Partial<Record<BrnFilterOperator, string>>;
 };
 
 /** English display names of the filter operators; override per grid with `operatorLabels`. */

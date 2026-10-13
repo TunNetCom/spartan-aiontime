@@ -6,6 +6,7 @@ import {
 	createRestAdapter,
 	type BrnDataGridColumnMeta,
 	type BrnFilterableColumn,
+	type BrnFilterOperator,
 } from '@spartan-ng/brain/data-grid';
 import {
 	columnFilteringFeature,
@@ -319,21 +320,32 @@ const filterAdapter = createRestAdapter<FilterGridUser>({
 	imports: [HlmDataGrid],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [debounceMs]="0" />
+		<hlm-data-grid
+			[adapter]="adapter"
+			[features]="features"
+			[columns]="columns"
+			[debounceMs]="0"
+			[operatorLabels]="operatorLabels()"
+		/>
 	`,
 })
 class FilterHost {
 	public readonly adapter = filterAdapter;
 	public readonly features = filterFeatures;
 	public readonly columns = filterColumns;
+	public readonly operatorLabels = signal<Partial<Record<BrnFilterOperator, string>>>({});
 }
 
-async function setupFilter(): Promise<{ fixture: ComponentFixture<FilterHost>; el: HTMLElement }> {
+async function setupFilter(): Promise<{
+	fixture: ComponentFixture<FilterHost>;
+	host: FilterHost;
+	el: HTMLElement;
+}> {
 	TestBed.configureTestingModule({ imports: [FilterHost] });
 	const fixture = TestBed.createComponent(FilterHost);
 	await fixture.whenStable().catch(() => undefined);
 	fixture.detectChanges();
-	return { fixture, el: fixture.nativeElement as HTMLElement };
+	return { fixture, host: fixture.componentInstance, el: fixture.nativeElement as HTMLElement };
 }
 
 async function settleFilter(fixture: ComponentFixture<FilterHost>): Promise<void> {
@@ -426,6 +438,7 @@ describe('HlmDataGrid header', () => {
 		filterFetchImpl = async () => ({ rows: FILTER_USERS, total: 2 });
 	});
 	afterEach(() => {
+		document.querySelectorAll('.cdk-overlay-container').forEach((el) => el.remove());
 		TestBed.resetTestingModule();
 	});
 
@@ -446,6 +459,46 @@ describe('HlmDataGrid header', () => {
 
 		expect(el.querySelectorAll('[data-slot="data-grid-filter-trigger"]').length).toBe(0);
 		expect(el.querySelectorAll('div[data-slot="data-grid-filter"]').length).toBe(0);
+	});
+
+	it('passes grid operatorLabels through to the filter popover', async () => {
+		const { fixture, host, el } = await setupFilter();
+		host.operatorLabels.set({ equals: 'same as' });
+		await settleFilter(fixture);
+
+		const nameTh = Array.from(el.querySelectorAll('thead th')).find((th) => th.textContent?.includes('Name')) as
+			| HTMLTableCellElement
+			| undefined;
+		(nameTh?.querySelector('[data-slot="data-grid-filter-trigger"]') as HTMLButtonElement).click();
+		fixture.detectChanges();
+		await fixture.whenStable();
+		fixture.detectChanges();
+
+		const panel = document.querySelector('.cdk-overlay-container [data-slot="data-grid-filter-panel"]') as HTMLElement;
+		expect(panel).not.toBeNull();
+		const labels = Array.from(panel.querySelectorAll('[data-slot="data-grid-operator"] option')).map((option) =>
+			option.textContent?.trim(),
+		);
+		expect(labels).toContain('same as');
+		expect(labels).not.toContain('is');
+	});
+
+	it('does not toggle sorting when the filter trigger is clicked', async () => {
+		const { fixture, el } = await setupFilter();
+
+		const nameTh = Array.from(el.querySelectorAll('thead th')).find((th) => th.textContent?.includes('Name')) as
+			| HTMLTableCellElement
+			| undefined;
+		(nameTh?.querySelector('[data-slot="data-grid-filter-trigger"]') as HTMLButtonElement).click();
+		fixture.detectChanges();
+		await fixture.whenStable();
+		fixture.detectChanges();
+
+		// The trigger is a sibling of the sort button, so the click never reaches its handler.
+		expect(nameTh?.getAttribute('aria-sort')).toBe('none');
+		expect(filterLastUrl).not.toContain('sortBy');
+		// The popover really opened, so the no-sort assertion is not vacuous.
+		expect(document.querySelector('.cdk-overlay-container [data-slot="data-grid-filter-panel"]')).not.toBeNull();
 	});
 });
 
@@ -832,11 +885,12 @@ describe('hlm-data-grid advanced filters', () => {
 	imports: [HlmDataGridColumnFilter],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<hlm-data-grid-column-filter [column]="column" />
+		<hlm-data-grid-column-filter [column]="column" [operatorLabels]="operatorLabels()" />
 	`,
 })
 class ColumnFilterHost {
 	public readonly setFilterValue = vi.fn();
+	public readonly operatorLabels = signal<Partial<Record<BrnFilterOperator, string>>>({});
 	public readonly column: BrnFilterableColumn = {
 		id: 'name',
 		columnDef: { meta: { filter: { type: 'string', label: 'Name' } } },
@@ -881,5 +935,30 @@ describe('HlmDataGridColumnFilter', () => {
 		const host = fixture.componentInstance;
 		expect(host.setFilterValue).toHaveBeenCalledTimes(1);
 		expect(host.setFilterValue).toHaveBeenCalledWith({ operator: 'contains', value: 'ada' });
+	});
+
+	it('renders operator labels overridden through the operatorLabels input', async () => {
+		TestBed.configureTestingModule({ imports: [ColumnFilterHost] });
+		const fixture = TestBed.createComponent(ColumnFilterHost);
+		fixture.componentInstance.operatorLabels.set({ equals: 'same as' });
+		fixture.detectChanges();
+		await fixture.whenStable();
+		fixture.detectChanges();
+
+		(fixture.nativeElement.querySelector('[data-slot="data-grid-filter-trigger"]') as HTMLButtonElement).click();
+		fixture.detectChanges();
+		await fixture.whenStable();
+		fixture.detectChanges();
+
+		const panel = document.querySelector('.cdk-overlay-container [data-slot="data-grid-filter-panel"]') as HTMLElement;
+		expect(panel).not.toBeNull();
+		const labels = Array.from(panel.querySelectorAll('[data-slot="data-grid-operator"] option')).map((option) =>
+			option.textContent?.trim(),
+		);
+		// `equals` shows the override instead of its English default (`is`); the untouched
+		// operators keep theirs, so a partial map does not drop the rest.
+		expect(labels).toContain('same as');
+		expect(labels).not.toContain('is');
+		expect(labels).toContain('contains');
 	});
 });
