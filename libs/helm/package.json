@@ -13,6 +13,7 @@
 		"@ng-icons/lucide": ">=32.0.0 <34.0.0",
 		"@spartan-ng/brain": "1.6.3",
 		"@tanstack/angular-charts": "0.16.0",
+		"@tanstack/angular-table": "9.1.2",
 		"@tanstack/charts": "0.16.0",
 		"class-variance-authority": "^0.7.0",
 		"clsx": "^2.1.1",
