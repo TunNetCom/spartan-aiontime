@@ -29,6 +29,7 @@ import { HlmSkeletonImports } from '@spartan-ng/helm/skeleton';
 import { HlmTableImports } from '@spartan-ng/helm/table';
 import { hlm } from '@spartan-ng/helm/utils';
 import { FlexRender, type ColumnDef, type RowData, type TableFeatures } from '@tanstack/angular-table';
+import { HLM_DATA_GRID_OPERATOR_LABELS } from './hlm-data-grid-filter-labels';
 import { HlmDataGridPagination } from './hlm-data-grid-pagination';
 
 let hlmDataGridNextId = 0;
@@ -820,23 +821,3 @@ export class HlmDataGrid<TData extends RowData> {
 		table?.setGlobalFilter?.(undefined);
 	}
 }
-
-/** English display names of the filter operators; override per grid with `operatorLabels`. */
-export const HLM_DATA_GRID_OPERATOR_LABELS: Record<BrnFilterOperator, string> = {
-	contains: 'contains',
-	equals: 'is',
-	startsWith: 'starts with',
-	endsWith: 'ends with',
-	gt: '>',
-	gte: '≥',
-	lt: '<',
-	lte: '≤',
-	between: 'between',
-	in: 'is any of',
-	isEmpty: 'is empty',
-	notEmpty: 'is not empty',
-	notContains: 'does not contain',
-	notEquals: 'is not',
-	isNull: 'is null',
-	notNull: 'is not null',
-};

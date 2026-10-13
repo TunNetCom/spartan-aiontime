@@ -1,7 +1,12 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { BrnDataGrid, createRestAdapter, type BrnDataGridColumnMeta } from '@spartan-ng/brain/data-grid';
+import {
+	BrnDataGrid,
+	createRestAdapter,
+	type BrnDataGridColumnMeta,
+	type BrnFilterableColumn,
+} from '@spartan-ng/brain/data-grid';
 import {
 	columnFilteringFeature,
 	columnVisibilityFeature,
@@ -14,8 +19,9 @@ import {
 	rowSortingFeature,
 	tableFeatures,
 } from '@tanstack/angular-table';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HlmDataGrid } from './hlm-data-grid';
+import { HlmDataGridColumnFilter } from './hlm-data-grid-column-filter';
 
 type GridUser = { name: string; email: string };
 
@@ -789,5 +795,62 @@ describe('hlm-data-grid advanced filters', () => {
 
 		expect(firstId).not.toBe('');
 		expect(firstId).not.toBe(secondId);
+	});
+});
+
+@Component({
+	selector: 'hlm-data-grid-column-filter-host',
+	imports: [HlmDataGridColumnFilter],
+	changeDetection: ChangeDetectionStrategy.OnPush,
+	template: `
+		<hlm-data-grid-column-filter [column]="column" />
+	`,
+})
+class ColumnFilterHost {
+	public readonly setFilterValue = vi.fn();
+	public readonly column: BrnFilterableColumn = {
+		id: 'name',
+		columnDef: { meta: { filter: { type: 'string', label: 'Name' } } },
+		getFilterValue: () => undefined,
+		setFilterValue: (value: unknown) => this.setFilterValue(value),
+	};
+}
+
+describe('HlmDataGridColumnFilter', () => {
+	afterEach(() => {
+		document.querySelectorAll('.cdk-overlay-container').forEach((el) => el.remove());
+		TestBed.resetTestingModule();
+	});
+
+	it('opens a popover and applies once', async () => {
+		TestBed.configureTestingModule({ imports: [ColumnFilterHost] });
+		const fixture = TestBed.createComponent(ColumnFilterHost);
+		fixture.detectChanges();
+		await fixture.whenStable();
+		fixture.detectChanges();
+		const el = fixture.nativeElement as HTMLElement;
+
+		(el.querySelector('[data-slot="data-grid-filter-trigger"]') as HTMLButtonElement).click();
+		fixture.detectChanges();
+		await fixture.whenStable();
+		fixture.detectChanges();
+
+		const panel = document.querySelector('.cdk-overlay-container [data-slot="data-grid-filter-panel"]') as HTMLElement;
+		expect(panel).not.toBeNull();
+
+		const operator = panel.querySelector('[data-slot="data-grid-operator"] select') as HTMLSelectElement;
+		operator.value = 'contains';
+		operator.dispatchEvent(new Event('change', { bubbles: true }));
+		const value = panel.querySelector('[data-slot="data-grid-value"]') as HTMLInputElement;
+		value.value = 'ada';
+		value.dispatchEvent(new Event('input', { bubbles: true }));
+		fixture.detectChanges();
+
+		(panel.querySelector('[data-slot="data-grid-filter-apply"]') as HTMLButtonElement).click();
+		fixture.detectChanges();
+
+		const host = fixture.componentInstance;
+		expect(host.setFilterValue).toHaveBeenCalledTimes(1);
+		expect(host.setFilterValue).toHaveBeenCalledWith({ operator: 'contains', value: 'ada' });
 	});
 });
