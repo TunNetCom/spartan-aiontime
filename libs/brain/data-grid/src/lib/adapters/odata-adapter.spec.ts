@@ -194,3 +194,24 @@ describe('createODataAdapter', () => {
 		expect(filterOf(adapter.buildQuery(state([], { globalFilter: 'ada' })))).toBe(`contains(email,'ada')`);
 	});
 });
+
+describe('odata typed values', () => {
+	it('makes date-only ranges and equality cover the whole calendar day', () => {
+		expect(
+			toODataFilterExpression({
+				id: 'created',
+				value: ['2024-01-01', '2024-01-31'],
+				operator: 'between',
+				type: 'date',
+			}),
+		).toBe('(created ge 2024-01-01 and created lt 2024-02-01)');
+		expect(toODataFilterExpression({ id: 'created', value: '2024-01-31', operator: 'equals', type: 'date' })).toBe(
+			'(created ge 2024-01-31 and created lt 2024-02-01)',
+		);
+	});
+	it('never emits a bare NaN for a non-numeric value in a number column', () => {
+		expect(toODataFilterExpression({ id: 'age', value: 'abc', operator: 'equals', type: 'number' })).toBe(
+			"age eq 'abc'",
+		);
+	});
+});

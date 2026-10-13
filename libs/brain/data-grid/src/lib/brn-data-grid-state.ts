@@ -8,10 +8,11 @@ import {
 	type TableOptions,
 } from '@tanstack/angular-table';
 import {
+	brnColumnDefId,
+	brnFlattenColumnDefs,
 	toBrnFilter,
 	toColumnFilters,
 	type BrnDataAdapter,
-	type BrnDataGridColumnMeta,
 	type BrnFilter,
 	type BrnFilterType,
 	type BrnGridState,
@@ -31,11 +32,6 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 	initial?: Partial<BrnGridState>;
 	/** Debounce window for filter-driven fetches. Filter inputs stay responsive; only the query is delayed. */
 	debounceMs?: number;
-	/**
-	 * Reserved for a future opt-in fetch mode. Fetches currently follow Angular `resource`
-	 * (including SSR); this flag is accepted but has no behavior yet.
-	 */
-	serverFetch?: boolean;
 	/**
 	 * The feature registry built with `tableFeatures(...)`.
 	 */
@@ -57,6 +53,14 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 	// responsive) while `query` below reads the applied copy, so filter keystrokes fetch once per pause
 	// instead of once per keystroke. Page/sort stay immediate via `query`.
 	const appliedFilters = signal({ columnFilters: raw().columnFilters, globalFilter: raw().globalFilter });
+
+	// Per-slice views of the raw state. Each one only notifies when its own slice changes, so a filter
+	// keystroke (which replaces the `raw` object) does not recompute the query or refetch the page.
+	const page = computed(() => raw().page);
+	const pageSize = computed(() => raw().pageSize);
+	const sorting = computed(() => raw().sorting);
+	const pendingColumnFilters = computed(() => raw().columnFilters);
+	const pendingGlobalFilter = computed(() => raw().globalFilter);
 	let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const setPage = (page: number) => {
@@ -80,8 +84,8 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 	// Safety net for filter updates that bypass the table handlers (direct `state` writes):
 	// the same shared timer debounces them into the applied copy.
 	effect((onCleanup) => {
-		raw().columnFilters;
-		raw().globalFilter;
+		pendingColumnFilters();
+		pendingGlobalFilter();
 		scheduleAppliedFilters();
 		onCleanup(() => clearTimeout(filterTimer));
 	});
@@ -96,11 +100,10 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 	/** Column filter types declared through `meta`, so the adapters can quote literals correctly. */
 	const filterTypes = computed<Record<string, BrnFilterType>>(() => {
 		const types: Record<string, BrnFilterType> = {};
-		for (const column of opts.columns) {
-			const def = column as { id?: unknown; accessorKey?: unknown; meta?: BrnDataGridColumnMeta };
+		for (const def of brnFlattenColumnDefs(opts.columns)) {
 			const type = def.meta?.filter?.type;
-			const id = def.id ?? def.accessorKey;
-			if (type && id !== undefined && id !== null) types[String(id)] = type;
+			const id = brnColumnDefId(def);
+			if (type && id !== undefined) types[id] = type;
 		}
 		return types;
 	});
@@ -109,11 +112,7 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 	const filters = computed<BrnFilter[]>(() => {
 		const types = filterTypes();
 		return appliedFilters()
-			.columnFilters.map((filter) => {
-				const resolved = toBrnFilter(filter.id, filter.value);
-				const type = types[filter.id];
-				return resolved && type ? { ...resolved, type } : resolved;
-			})
+			.columnFilters.map((filter) => toBrnFilter(filter.id, filter.value, types[filter.id]))
 			.filter((filter): filter is BrnFilter => filter !== undefined);
 	});
 	const globalFilter = computed(() => {
@@ -121,18 +120,20 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 		return value === undefined || value === null || value === '' ? undefined : String(value);
 	});
 
-	const query = computed(() =>
-		opts.adapter.buildQuery({
-			page: raw().page,
-			pageSize: raw().pageSize,
-			sorting: raw().sorting,
-			filters: filters(),
-			globalFilter: globalFilter(),
-		}),
-	);
+	/** The state adapters and consumers see: filters carry their resolved operator. */
+	const state = computed<BrnGridState>(() => ({
+		page: page(),
+		pageSize: pageSize(),
+		sorting: sorting(),
+		filters: filters(),
+		globalFilter: globalFilter(),
+	}));
+	// Only reads the applied slices: pending filter keystrokes never rebuild the query, so the
+	// resource below (which refetches whenever its params change identity) stays put until they apply.
+	const query = computed(() => opts.adapter.buildQuery(state()));
 	const res: ResourceRef<{ rows: TData[]; total: number } | undefined> = resource({
-		params: () => ({ q: query(), page: raw().page, sorting: raw().sorting }),
-		loader: ({ params, abortSignal }: any) => opts.adapter.fetch(params.q, abortSignal),
+		params: () => ({ q: query() }),
+		loader: ({ params, abortSignal }) => opts.adapter.fetch(params.q, abortSignal),
 	});
 	// `resource.value()` throws once the resource is in an error state and `hasValue()` is false
 	// there, so the last successful payload is mirrored: a failed refetch keeps the previous page on
@@ -193,13 +194,5 @@ export function injectBrnDataGrid<TData extends RowData>(opts: {
 				// state and option shapes, and this function's public signature stays typed.
 			}) as unknown as TableOptions<any, TData>,
 	);
-	/** The state adapters and consumers see: filters carry their resolved operator. */
-	const state = computed<BrnGridState>(() => ({
-		page: raw().page,
-		pageSize: raw().pageSize,
-		sorting: raw().sorting,
-		filters: filters(),
-		globalFilter: globalFilter(),
-	}));
 	return { table, state, query, data, total, loading, error, reload: () => res.reload() };
 }

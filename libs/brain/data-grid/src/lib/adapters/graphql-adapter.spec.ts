@@ -160,3 +160,17 @@ describe('toGraphQLFilterValue', () => {
 		expect(toGraphQLFilterValue({ id: 'age', value: [], operator: 'in' })).toBeUndefined();
 	});
 });
+
+describe('graphql typed values', () => {
+	it('sends numbers as numbers and makes date-only ranges inclusive of the last day', () => {
+		expect(
+			where([
+				{ id: 'age', value: [18, 65], operator: 'between', type: 'number' },
+				{ id: 'created', value: ['2024-01-01', '2024-01-31'], operator: 'between', type: 'date' },
+			]),
+		).toEqual({
+			age: { gte: 18, lte: 65 },
+			created: { gte: '2024-01-01', lt: '2024-02-01' },
+		});
+	});
+});

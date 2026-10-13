@@ -3670,6 +3670,11 @@ exports[`generate-ui-docs executor > produces stable output 1`] = `
             "type": "unknown",
           },
           {
+            "name": "pageSizeOptions",
+            "required": false,
+            "type": "readonly number[]",
+          },
+          {
             "name": "showToolbar",
             "required": false,
             "type": "unknown",
@@ -3715,6 +3720,46 @@ exports[`generate-ui-docs executor > produces stable output 1`] = `
             "type": "unknown",
           },
           {
+            "name": "operatorLabels",
+            "required": false,
+            "type": "Partial<Record<BrnFilterOperator, string>>",
+          },
+          {
+            "name": "operatorText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "valueText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "fromText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "toText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "allText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "trueText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "falseText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
             "name": "class",
             "required": false,
             "type": "unknown",
@@ -3735,6 +3780,46 @@ exports[`generate-ui-docs executor > produces stable output 1`] = `
             "name": "table",
             "required": false,
             "type": "Table<any, TData> | null",
+          },
+          {
+            "name": "pageSizeOptions",
+            "required": false,
+            "type": "readonly number[]",
+          },
+          {
+            "name": "rowsPerPageText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "previousText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "nextText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "firstText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "lastText",
+            "required": false,
+            "type": "unknown",
+          },
+          {
+            "name": "pageText",
+            "required": false,
+            "type": "(page: number, pageCount: number) => string",
+          },
+          {
+            "name": "selectionText",
+            "required": false,
+            "type": "(selected: number, total: number) => string",
           },
           {
             "name": "class",

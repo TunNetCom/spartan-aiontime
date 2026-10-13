@@ -181,4 +181,39 @@ describe('injectBrnDataGrid filter debounce', () => {
 		expect(grid.query().page).toBe('2');
 		expect(grid.query()['filter[email]']).toBe('ada');
 	});
+
+	it('fetches once per typing pause, not once per keystroke', async () => {
+		const fetchFn = vi.fn(async () => ({ rows: [] as DebounceUser[], total: 0 }));
+		const grid = TestBed.runInInjectionContext(() =>
+			injectBrnDataGrid({
+				adapter: createRestAdapter<DebounceUser>({ baseUrl: '/api/users', fetchFn }),
+				initial: { pageSize: 5 },
+				debounceMs: 60,
+				features: debounceFeatures,
+				columns: debounceColumns,
+			}),
+		);
+		const appRef = TestBed.inject(ApplicationRef);
+		appRef.tick();
+		await sleep(0);
+		appRef.tick();
+		const initialCalls = fetchFn.mock.calls.length;
+		expect(initialCalls).toBe(1);
+
+		for (const value of ['a', 'ad', 'ada']) {
+			grid.table.getColumn('email')?.setFilterValue(value);
+			appRef.tick();
+			await sleep(5);
+			appRef.tick();
+		}
+		// Keystrokes inside the debounce window must not reach the backend.
+		expect(fetchFn.mock.calls.length).toBe(initialCalls);
+
+		await sleep(150);
+		appRef.tick();
+		await sleep(0);
+		appRef.tick();
+		expect(fetchFn.mock.calls.length).toBe(initialCalls + 1);
+		expect(String((fetchFn.mock.calls.at(-1) as unknown[])[0])).toContain('filter%5Bemail%5D=ada');
+	});
 });

@@ -1,4 +1,10 @@
-import type { BrnDataAdapter, BrnFilter, BrnFilterType, BrnGridState } from '../brn-data-source';
+import {
+	toBrnComparisons,
+	type BrnDataAdapter,
+	type BrnFilter,
+	type BrnFilterType,
+	type BrnGridState,
+} from '../brn-data-source';
 
 const esc = (v: unknown) => String(v ?? '').replace(/'/g, "''");
 const isBlank = (value: unknown) => value === undefined || value === null || value === '';
@@ -8,7 +14,12 @@ const isBlank = (value: unknown) => value === undefined || value === null || val
  * booleans stay bare and everything else is quoted, so no literal is guessed into the wrong type.
  */
 function odataLiteral(value: unknown, type?: BrnFilterType): string {
-	if (type === 'number') return String(Number(value));
+	if (type === 'number') {
+		const number = Number(value);
+		// A non-numeric value never reaches here from the grid (it is dropped while resolving the
+		// filter); quoting it keeps a hand-built filter from emitting a bare `NaN` token.
+		return Number.isFinite(number) ? String(number) : `'${esc(value)}'`;
+	}
 	if (type === 'date') return value instanceof Date ? value.toISOString() : String(value);
 	if (type === 'boolean') return value ? 'true' : 'false';
 	if (type === 'string' || type === 'select') return `'${esc(value)}'`;
@@ -38,19 +49,15 @@ export function toODataFilterExpression(filter: BrnFilter): string | undefined {
 		case 'endsWith':
 			return `endswith(${field},${odataLiteral(filter.value, filter.type)})`;
 		case 'equals':
-			return `${field} eq ${odataLiteral(filter.value, filter.type)}`;
 		case 'gt':
 		case 'gte':
 		case 'lt':
-		case 'lte': {
-			const comparison = { gt: 'gt', gte: 'ge', lt: 'lt', lte: 'le' }[filter.operator];
-			return `${field} ${comparison} ${odataLiteral(filter.value, filter.type)}`;
-		}
+		case 'lte':
 		case 'between': {
-			const [from, to] = Array.isArray(filter.value) ? filter.value : [undefined, undefined];
-			const bounds: string[] = [];
-			if (!isBlank(from)) bounds.push(`${field} ge ${odataLiteral(from, filter.type)}`);
-			if (!isBlank(to)) bounds.push(`${field} le ${odataLiteral(to, filter.type)}`);
+			const comparisons = { eq: 'eq', gt: 'gt', gte: 'ge', lt: 'lt', lte: 'le' } as const;
+			const bounds = (toBrnComparisons(filter) ?? []).map(
+				({ operator, value }) => `${field} ${comparisons[operator]} ${odataLiteral(value, filter.type)}`,
+			);
 			if (!bounds.length) return undefined;
 			return bounds.length === 1 ? bounds[0] : `(${bounds.join(' and ')})`;
 		}

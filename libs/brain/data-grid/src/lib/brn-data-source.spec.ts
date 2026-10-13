@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
 	BRN_FILTER_OPERATORS,
+	brnCoerceFilterValue,
 	brnDefaultFilterOperator,
+	brnDefaultOperatorForType,
+	brnFlattenColumnDefs,
 	isBrnFilterSpec,
+	toBrnComparisons,
 	toBrnFilter,
 	toColumnFilters,
 	type BrnFilter,
@@ -17,9 +21,13 @@ describe('brnDefaultFilterOperator', () => {
 		expect(brnDefaultFilterOperator(42)).toBe('equals');
 		expect(brnDefaultFilterOperator(false)).toBe('equals');
 	});
-	it('treats a two-entry array as a range and longer arrays as a set', () => {
-		expect(brnDefaultFilterOperator([1, 10])).toBe('between');
+	it('treats an array as a set unless the column is ordered, where a pair is a range', () => {
+		expect(brnDefaultFilterOperator(['admin', 'user'])).toBe('in');
+		expect(brnDefaultFilterOperator([1, 10])).toBe('in');
 		expect(brnDefaultFilterOperator(['a', 'b', 'c'])).toBe('in');
+		expect(brnDefaultFilterOperator([1, 10], 'number')).toBe('between');
+		expect(brnDefaultFilterOperator(['2024-01-01', '2024-02-01'], 'date')).toBe('between');
+		expect(brnDefaultFilterOperator(['admin', 'user'], 'select')).toBe('in');
 	});
 	it('treats empty values as isEmpty', () => {
 		expect(brnDefaultFilterOperator('')).toBe('isEmpty');
@@ -156,5 +164,94 @@ describe('BRN_FILTER_OPERATORS', () => {
 		expect(BRN_FILTER_OPERATORS.date).toContain('between');
 		expect(BRN_FILTER_OPERATORS.boolean).toEqual(['equals']);
 		expect(BRN_FILTER_OPERATORS.select).toContain('in');
+	});
+});
+
+describe('brnDefaultOperatorForType', () => {
+	it('starts ordered columns on a range, choices on equality and text on contains', () => {
+		expect(brnDefaultOperatorForType('number')).toBe('between');
+		expect(brnDefaultOperatorForType('date')).toBe('between');
+		expect(brnDefaultOperatorForType('boolean')).toBe('equals');
+		expect(brnDefaultOperatorForType('select')).toBe('equals');
+		expect(brnDefaultOperatorForType('string')).toBe('contains');
+		expect(brnDefaultOperatorForType(undefined)).toBe('contains');
+	});
+});
+
+describe('typed filter values', () => {
+	it('coerces input strings to the declared column type', () => {
+		expect(brnCoerceFilterValue('30', 'number')).toBe(30);
+		expect(brnCoerceFilterValue(' 2.5 ', 'number')).toBe(2.5);
+		expect(brnCoerceFilterValue('abc', 'number')).toBeUndefined();
+		expect(brnCoerceFilterValue('true', 'boolean')).toBe(true);
+		expect(brnCoerceFilterValue('false', 'boolean')).toBe(false);
+		expect(brnCoerceFilterValue('2024-01-31', 'date')).toBe('2024-01-31');
+		expect(brnCoerceFilterValue('30', 'string')).toBe('30');
+		expect(brnCoerceFilterValue('30', undefined)).toBe('30');
+	});
+
+	it('resolves typed filters with coerced values and drops unreadable ones', () => {
+		expect(toBrnFilter('age', { operator: 'gte', value: '30' }, 'number')).toEqual({
+			id: 'age',
+			value: 30,
+			operator: 'gte',
+			type: 'number',
+		});
+		expect(toBrnFilter('age', { operator: 'between', value: ['18', 'x'] }, 'number')).toEqual({
+			id: 'age',
+			value: [18, undefined],
+			operator: 'between',
+			type: 'number',
+		});
+		expect(toBrnFilter('age', { operator: 'gte', value: 'abc' }, 'number')).toBeUndefined();
+		expect(toBrnFilter('role', ['admin', 'user'], 'select')).toEqual({
+			id: 'role',
+			value: ['admin', 'user'],
+			operator: 'in',
+			type: 'select',
+		});
+	});
+});
+
+describe('toBrnComparisons', () => {
+	it('lowers equality, comparisons and ranges into bounds', () => {
+		expect(toBrnComparisons({ id: 'age', value: 30, operator: 'equals', type: 'number' })).toEqual([
+			{ operator: 'eq', value: 30 },
+		]);
+		expect(toBrnComparisons({ id: 'age', value: 30, operator: 'lte', type: 'number' })).toEqual([
+			{ operator: 'lte', value: 30 },
+		]);
+		expect(toBrnComparisons({ id: 'age', value: [18, undefined], operator: 'between' })).toEqual([
+			{ operator: 'gte', value: 18 },
+		]);
+		expect(toBrnComparisons({ id: 'name', value: 'a', operator: 'contains' })).toBeUndefined();
+	});
+
+	it('makes date-only bounds cover the whole calendar day', () => {
+		const date = (operator: BrnFilter['operator'], value: unknown) =>
+			toBrnComparisons({ id: 'created', value, operator, type: 'date' });
+		expect(date('between', ['2024-01-01', '2024-01-31'])).toEqual([
+			{ operator: 'gte', value: '2024-01-01' },
+			{ operator: 'lt', value: '2024-02-01' },
+		]);
+		expect(date('equals', '2024-02-28')).toEqual([
+			{ operator: 'gte', value: '2024-02-28' },
+			{ operator: 'lt', value: '2024-02-29' },
+		]);
+		expect(date('lte', '2024-12-31')).toEqual([{ operator: 'lt', value: '2025-01-01' }]);
+		expect(date('gt', '2024-03-30')).toEqual([{ operator: 'gte', value: '2024-03-31' }]);
+		expect(date('gte', '2024-03-30')).toEqual([{ operator: 'gte', value: '2024-03-30' }]);
+		// A full timestamp is already precise and is passed through untouched.
+		expect(date('lte', '2024-01-31T12:00:00Z')).toEqual([{ operator: 'lte', value: '2024-01-31T12:00:00Z' }]);
+	});
+});
+
+describe('brnFlattenColumnDefs', () => {
+	it('expands group columns into their leaves', () => {
+		const leaves = brnFlattenColumnDefs([
+			{ id: 'name' },
+			{ id: 'group', columns: [{ accessorKey: 'age' }, { id: 'nested', columns: [{ id: 'email' }] }] },
+		]);
+		expect(leaves.map((leaf) => leaf.id ?? leaf.accessorKey)).toEqual(['name', 'age', 'email']);
 	});
 });

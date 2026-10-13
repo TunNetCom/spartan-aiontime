@@ -1,4 +1,10 @@
-import type { BrnDataAdapter, BrnFilter, BrnGridState, BrnSort } from '../brn-data-source';
+import {
+	toBrnComparisons,
+	type BrnDataAdapter,
+	type BrnFilter,
+	type BrnGridState,
+	type BrnSort,
+} from '../brn-data-source';
 
 export type GraphQLVariables = {
 	offset?: number;
@@ -15,6 +21,8 @@ const isBlank = (value: unknown) => value === undefined || value === null || val
 /**
  * The default `where` fragment for one grid filter, keyed by the operator name so it lines up with the
  * grid's own vocabulary. Ranges become `{ gte, lte }` with blank bounds dropped, sets become `{ in }`.
+ * Values arrive already coerced to the column's declared type (`30`, not `'30'`), which typed GraphQL
+ * schemas require; date-only bounds cover the whole calendar day (`{ gte: day, lt: next day }`).
  */
 export function toGraphQLFilterValue(filter: BrnFilter): Record<string, unknown> | undefined {
 	switch (filter.operator) {
@@ -25,17 +33,15 @@ export function toGraphQLFilterValue(filter: BrnFilter): Record<string, unknown>
 		case 'endsWith':
 			return { endsWith: filter.value };
 		case 'equals':
-			return { equals: filter.value };
 		case 'gt':
 		case 'gte':
 		case 'lt':
 		case 'lte':
-			return { [filter.operator]: filter.value };
 		case 'between': {
-			const [from, to] = Array.isArray(filter.value) ? filter.value : [undefined, undefined];
 			const bounds: Record<string, unknown> = {};
-			if (!isBlank(from)) bounds['gte'] = from;
-			if (!isBlank(to)) bounds['lte'] = to;
+			for (const { operator, value } of toBrnComparisons(filter) ?? []) {
+				bounds[operator === 'eq' ? 'equals' : operator] = value;
+			}
 			return Object.keys(bounds).length ? bounds : undefined;
 		}
 		case 'in': {

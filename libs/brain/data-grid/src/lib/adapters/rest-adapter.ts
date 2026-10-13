@@ -1,24 +1,24 @@
-import type { BrnDataAdapter, BrnFilter, BrnGridState, BrnSort } from '../brn-data-source';
+import {
+	toBrnComparisons,
+	type BrnDataAdapter,
+	type BrnFilter,
+	type BrnGridState,
+	type BrnSort,
+} from '../brn-data-source';
 
 const isBlank = (value: unknown) => value === undefined || value === null || value === '';
-const text = (value: unknown) => String(value);
+const text = (value: unknown) => (value instanceof Date ? value.toISOString() : String(value));
 
 /**
  * The default REST filter convention: `contains` keeps the plain `filter[id]=value` shape, every other
- * operator qualifies it (`filter[id][gte]`), `between` splits into its bounds and `in` joins the list.
- * Blank bounds are dropped so `between` can be open-ended on either side.
+ * operator qualifies it (`filter[id][gte]`), `in` joins the list and `equals` stays `filter[id][equals]`.
+ * Comparisons and ranges go through `toBrnComparisons`, so `between` splits into its bounds (blank
+ * bounds dropped) and date-only bounds cover the whole calendar day (`filter[id][lt]=<next day>`).
  */
 export function toRestFilterParams(filter: BrnFilter): Record<string, string> {
 	const key = `filter[${filter.id}]`;
 
 	switch (filter.operator) {
-		case 'between': {
-			const [from, to] = Array.isArray(filter.value) ? filter.value : [undefined, undefined];
-			const params: Record<string, string> = {};
-			if (!isBlank(from)) params[`${key}[gte]`] = text(from);
-			if (!isBlank(to)) params[`${key}[lte]`] = text(to);
-			return params;
-		}
 		case 'in': {
 			const list = (Array.isArray(filter.value) ? filter.value : [filter.value]).filter((v) => !isBlank(v));
 			return list.length ? { [`${key}[in]`]: list.map(text).join(',') } : {};
@@ -28,9 +28,16 @@ export function toRestFilterParams(filter: BrnFilter): Record<string, string> {
 			return { [`${key}[${filter.operator}]`]: 'true' };
 		case 'contains':
 			return isBlank(filter.value) ? {} : { [key]: text(filter.value) };
-		default:
+		case 'startsWith':
+		case 'endsWith':
 			return isBlank(filter.value) ? {} : { [`${key}[${filter.operator}]`]: text(filter.value) };
 	}
+
+	const params: Record<string, string> = {};
+	for (const { operator, value } of toBrnComparisons(filter) ?? []) {
+		params[`${key}[${operator === 'eq' ? 'equals' : operator}]`] = text(value);
+	}
+	return params;
 }
 
 export function createRestAdapter<TData>(opts: {

@@ -607,3 +607,187 @@ describe('hlm-data-grid toolbar', () => {
 		expect(first.el.querySelector('[data-slot="data-grid-toolbar"] label')?.getAttribute('for')).toBe(firstInput.id);
 	});
 });
+
+describe('hlm-data-grid pagination', () => {
+	beforeEach(() => {
+		fetchCount = 0;
+		lastUrl = '';
+		fetchImpl = async () => ({ rows: USERS, total: 42 });
+	});
+	afterEach(() => {
+		TestBed.resetTestingModule();
+	});
+
+	it('shows the current page out of the page count derived from the total', async () => {
+		const { el } = await setup();
+
+		// 42 rows at the default page size of 10.
+		expect(el.querySelector('[data-slot="data-grid-page"]')?.textContent).toContain('Page 1 of 5');
+	});
+
+	it('changes the page size from the picker and goes back to the first page', async () => {
+		const { fixture, el } = await setup();
+		(el.querySelector('[data-slot="data-grid-next"]') as HTMLButtonElement).click();
+		await settle(fixture);
+		expect(lastUrl).toContain('page=2');
+
+		const picker = el.querySelector('[data-slot="data-grid-page-size"] select') as HTMLSelectElement;
+		picker.value = '20';
+		picker.dispatchEvent(new Event('change', { bubbles: true }));
+		await settle(fixture);
+
+		expect(lastUrl).toContain('pageSize=20');
+		expect(lastUrl).toContain('page=1');
+		expect(el.querySelector('[data-slot="data-grid-page"]')?.textContent).toContain('Page 1 of 3');
+	});
+
+	it('jumps to the last and first page', async () => {
+		const { fixture, el } = await setup();
+		(el.querySelector('[data-slot="data-grid-last"]') as HTMLButtonElement).click();
+		await settle(fixture);
+		expect(lastUrl).toContain('page=5');
+
+		(el.querySelector('[data-slot="data-grid-first"]') as HTMLButtonElement).click();
+		await settle(fixture);
+		expect(lastUrl).toContain('page=1');
+	});
+});
+
+const minimalFeatures = tableFeatures({
+	columnVisibilityFeature,
+	rowPaginationFeature,
+});
+const minimalColumnHelper = createColumnHelper<typeof minimalFeatures, GridUser>();
+const minimalColumns = [
+	minimalColumnHelper.accessor('name', { id: 'name', header: 'Name', cell: (info) => info.getValue<string>() }),
+];
+
+@Component({
+	selector: 'hlm-data-grid-minimal-host',
+	imports: [HlmDataGrid],
+	changeDetection: ChangeDetectionStrategy.OnPush,
+	template: `
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [showToolbar]="false" />
+	`,
+})
+class MinimalHost {
+	public readonly adapter = adapter;
+	public readonly features = minimalFeatures;
+	public readonly columns = minimalColumns;
+}
+
+describe('hlm-data-grid without optional features', () => {
+	afterEach(() => {
+		TestBed.resetTestingModule();
+	});
+
+	it('renders and pages without rowSelectionFeature', async () => {
+		fetchImpl = async () => ({ rows: USERS, total: 42 });
+		TestBed.configureTestingModule({ imports: [MinimalHost] });
+		const fixture = TestBed.createComponent(MinimalHost);
+		await fixture.whenStable();
+		fixture.detectChanges();
+		const el = fixture.nativeElement as HTMLElement;
+
+		expect(el.textContent).toContain('Ada');
+		expect(el.querySelector('[data-slot="data-grid-selection"]')?.textContent?.trim()).toBe('');
+		expect(el.querySelector('[data-slot="data-grid-page"]')?.textContent).toContain('Page 1 of 5');
+	});
+
+	it('shows the rows even when the backend reports no total', async () => {
+		fetchImpl = async () => ({ rows: USERS, total: 0 });
+		TestBed.configureTestingModule({ imports: [MinimalHost] });
+		const fixture = TestBed.createComponent(MinimalHost);
+		await fixture.whenStable();
+		fixture.detectChanges();
+		const el = fixture.nativeElement as HTMLElement;
+
+		expect(el.textContent).toContain('Ada');
+		expect(el.textContent).not.toContain('No results.');
+	});
+});
+
+describe('hlm-data-grid advanced filters', () => {
+	beforeEach(() => {
+		filterLastUrl = '';
+		filterFetchImpl = async () => ({ rows: FILTER_USERS, total: 2 });
+	});
+	afterEach(() => {
+		TestBed.resetTestingModule();
+	});
+
+	const pickOperator = (filter: HTMLElement, operator: string) => {
+		const select = filter.querySelector('[data-slot="data-grid-operator"] select') as HTMLSelectElement;
+		select.value = operator;
+		select.dispatchEvent(new Event('change', { bubbles: true }));
+	};
+
+	it('shows one value input for a single-value comparison and keeps the typed value', async () => {
+		const { fixture, el } = await setupFilter();
+		const ageFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="age"]') as HTMLElement;
+		const from = ageFilter.querySelector('[data-slot="data-grid-value-from"]') as HTMLInputElement;
+		from.value = '30';
+		from.dispatchEvent(new Event('input', { bubbles: true }));
+		fixture.detectChanges();
+
+		pickOperator(ageFilter, 'gte');
+		fixture.detectChanges();
+		await sleep(50);
+		await settleFilter(fixture);
+
+		const inputs = ageFilter.querySelectorAll('input');
+		expect(inputs.length).toBe(1);
+		expect((inputs[0] as HTMLInputElement).value).toBe('30');
+		expect(filterLastUrl).toContain('filter%5Bage%5D%5Bgte%5D=30');
+	});
+
+	it('picks several options of a select column with the set operator', async () => {
+		const { fixture, el } = await setupFilter();
+		const statusFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="status"]') as HTMLElement;
+		pickOperator(statusFilter, 'in');
+		fixture.detectChanges();
+
+		const boxes = () =>
+			Array.from(
+				statusFilter.querySelectorAll('[data-slot="data-grid-value-set"] button[role="checkbox"]'),
+			) as HTMLElement[];
+		expect(boxes().length).toBe(2);
+		boxes()[0].click();
+		fixture.detectChanges();
+		boxes()[1].click();
+		fixture.detectChanges();
+		await sleep(50);
+		await settleFilter(fixture);
+
+		expect(decodeURIComponent(filterLastUrl)).toContain('filter[status][in]=open,closed');
+		const chip = el.querySelector('[data-slot="data-grid-chip"]') as HTMLElement;
+		expect(chip.textContent).toContain('Open, Closed');
+	});
+
+	it('labels operators for people rather than with their ids', async () => {
+		const { el } = await setupFilter();
+		const ageFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="age"]') as HTMLElement;
+		const labels = Array.from(ageFilter.querySelectorAll('[data-slot="data-grid-operator"] option')).map((option) =>
+			option.textContent?.trim(),
+		);
+		expect(labels).toContain('between');
+		expect(labels).toContain('≥');
+		expect(labels).not.toContain('gte');
+	});
+
+	it('gives each grid its own filter control ids', async () => {
+		const first = await setupFilter();
+		const firstId = (
+			first.el.querySelector('[data-slot="data-grid-filter"] [data-slot="data-grid-value"]') as HTMLElement
+		).id;
+		TestBed.resetTestingModule();
+		const second = await setupFilter();
+		const secondId = (
+			second.el.querySelector('[data-slot="data-grid-filter"] [data-slot="data-grid-value"]') as HTMLElement
+		).id;
+		TestBed.resetTestingModule();
+
+		expect(firstId).not.toBe('');
+		expect(firstId).not.toBe(secondId);
+	});
+});

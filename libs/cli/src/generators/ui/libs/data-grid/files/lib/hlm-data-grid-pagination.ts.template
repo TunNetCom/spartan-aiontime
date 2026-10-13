@@ -1,38 +1,176 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { NgIcon, provideIcons } from '@ng-icons/core';
+import { lucideChevronLeft, lucideChevronRight, lucideChevronsLeft, lucideChevronsRight } from '@ng-icons/lucide';
 import { HlmButtonImports } from '<%- importAlias %>/button';
+import { HlmNativeSelectImports } from '<%- importAlias %>/native-select';
 import { hlm } from '<%- importAlias %>/utils';
 import type { RowData, Table } from '@tanstack/angular-table';
 
+let hlmDataGridPaginationNextId = 0;
+
+/**
+ * Pager for a server-driven grid: page-size picker, "page x of y", and first/previous/next/last
+ * buttons. The page count comes from the adapter's `total` (TanStack's `rowCount`).
+ *
+ * Needs `rowPaginationFeature`. With `rowSelectionFeature` it also reports the selected-row count.
+ */
 @Component({
 	selector: 'hlm-data-grid-pagination',
-	imports: [...HlmButtonImports],
+	imports: [NgIcon, ...HlmButtonImports, ...HlmNativeSelectImports],
+	providers: [provideIcons({ lucideChevronLeft, lucideChevronRight, lucideChevronsLeft, lucideChevronsRight })],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	host: { '[class]': '_cls()' },
 	template: `
-		<div class="flex items-center justify-between py-4">
-			<div class="text-muted-foreground text-sm" aria-live="polite">{{ _selection() }}</div>
-			<div class="flex items-center gap-2">
-				<button size="sm" variant="outline" hlmBtn [disabled]="!_canPrev()" (click)="_prev()">Previous</button>
-				<button size="sm" variant="outline" hlmBtn [disabled]="!_canNext()" (click)="_next()">Next</button>
+		<div class="flex flex-wrap items-center justify-between gap-4 py-4">
+			<div class="text-muted-foreground text-sm" data-slot="data-grid-selection" aria-live="polite">
+				{{ _selection() }}
+			</div>
+			<div class="flex flex-wrap items-center gap-4 lg:gap-6">
+				@if (_pageSizes().length) {
+					<div class="flex items-center gap-2">
+						<label class="text-sm font-medium" [for]="_pageSizeId">{{ rowsPerPageText() }}</label>
+						<hlm-native-select
+							data-slot="data-grid-page-size"
+							size="sm"
+							[selectId]="_pageSizeId"
+							[value]="_pageSizeValue()"
+							(change)="_onPageSize($event)"
+						>
+							@for (size of _pageSizes(); track size) {
+								<option hlmNativeSelectOption [value]="'' + size">{{ size }}</option>
+							}
+						</hlm-native-select>
+					</div>
+				}
+				<div class="text-sm font-medium" data-slot="data-grid-page">{{ _pageLabel() }}</div>
+				<div class="flex items-center gap-2">
+					<button
+						hlmBtn
+						size="icon-sm"
+						variant="outline"
+						data-slot="data-grid-first"
+						[attr.aria-label]="firstText()"
+						[disabled]="!_canPrev()"
+						(click)="_first()"
+					>
+						<ng-icon name="lucideChevronsLeft" aria-hidden="true" />
+					</button>
+					<button
+						size="sm"
+						variant="outline"
+						hlmBtn
+						data-slot="data-grid-prev"
+						[disabled]="!_canPrev()"
+						(click)="_prev()"
+					>
+						<ng-icon name="lucideChevronLeft" aria-hidden="true" />
+						{{ previousText() }}
+					</button>
+					<button
+						size="sm"
+						variant="outline"
+						hlmBtn
+						data-slot="data-grid-next"
+						[disabled]="!_canNext()"
+						(click)="_next()"
+					>
+						{{ nextText() }}
+						<ng-icon name="lucideChevronRight" aria-hidden="true" />
+					</button>
+					<button
+						hlmBtn
+						size="icon-sm"
+						variant="outline"
+						data-slot="data-grid-last"
+						[attr.aria-label]="lastText()"
+						[disabled]="!_canNext()"
+						(click)="_last()"
+					>
+						<ng-icon name="lucideChevronsRight" aria-hidden="true" />
+					</button>
+				</div>
 			</div>
 		</div>
 	`,
 })
 export class HlmDataGridPagination<TData extends RowData> {
 	public readonly table = input<Table<any, TData> | null>(null);
+
+	/** Page sizes offered by the picker. An empty list hides it. The current size is always offered. */
+	public readonly pageSizeOptions = input<readonly number[]>([10, 20, 50, 100]);
+
+	public readonly rowsPerPageText = input('Rows per page');
+	public readonly previousText = input('Previous');
+	public readonly nextText = input('Next');
+	public readonly firstText = input('First page');
+	public readonly lastText = input('Last page');
+
+	/** Formats the page indicator; `page` is 1-based. */
+	public readonly pageText = input<(page: number, pageCount: number) => string>(
+		(page, pageCount) => `Page ${page} of ${pageCount}`,
+	);
+
+	/** Formats the selection summary (only shown with `rowSelectionFeature`). */
+	public readonly selectionText = input<(selected: number, total: number) => string>(
+		(selected, total) => `${selected} of ${total} row(s) selected`,
+	);
+
 	public readonly class = input('');
+
 	protected readonly _cls = computed(() => hlm('w-full', this.class()));
+	protected readonly _pageSizeId = `hlm-data-grid-page-size-${hlmDataGridPaginationNextId++}`;
+
+	/** The table's pagination slice. Table atoms are Angular signals, so this tracks page changes. */
+	private readonly _pagination = computed(() => {
+		const atoms = this.table()?.atoms as { pagination?: { get: () => { pageIndex: number; pageSize: number } } };
+		return atoms?.pagination?.get();
+	});
+
 	protected readonly _canPrev = computed(() => this.table()?.getCanPreviousPage() ?? false);
 	protected readonly _canNext = computed(() => this.table()?.getCanNextPage() ?? false);
-	protected readonly _selection = computed(() => {
-		const t = this.table();
-		if (!t) return '';
-		return `${t.getSelectedRowModel()?.rows?.length ?? 0} of ${t.getRowCount?.() ?? 0} row(s) selected`;
+
+	protected readonly _pageSizes = computed(() => {
+		const options = this.pageSizeOptions();
+		if (!options.length) return [];
+		const current = this._pagination()?.pageSize;
+		const sizes = current && !options.includes(current) ? [...options, current] : [...options];
+		return sizes.sort((a, b) => a - b);
 	});
+
+	protected readonly _pageSizeValue = computed(() => String(this._pagination()?.pageSize ?? ''));
+
+	protected readonly _pageLabel = computed(() => {
+		const table = this.table();
+		if (!table) return '';
+		const pageCount = Math.max(table.getPageCount?.() ?? 1, 1);
+		const page = Math.min((this._pagination()?.pageIndex ?? 0) + 1, pageCount);
+		return this.pageText()(page, pageCount);
+	});
+
+	protected readonly _selection = computed(() => {
+		const table = this.table() as (Table<any, TData> & { getSelectedRowModel?: () => { rows: unknown[] } }) | null;
+		// Selection is optional: without `rowSelectionFeature` TanStack does not add the method at all.
+		if (!table || typeof table.getSelectedRowModel !== 'function') return '';
+		return this.selectionText()(table.getSelectedRowModel().rows.length, table.getRowCount?.() ?? 0);
+	});
+
+	protected _onPageSize(event: Event): void {
+		const size = Number((event.target as HTMLSelectElement).value);
+		if (!Number.isFinite(size) || size <= 0) return;
+		// A new page size re-slices the result set: go back to the first page.
+		this.table()?.setPagination({ pageIndex: 0, pageSize: size });
+	}
+
+	protected _first() {
+		this.table()?.firstPage();
+	}
 	protected _prev() {
 		this.table()?.previousPage();
 	}
 	protected _next() {
 		this.table()?.nextPage();
+	}
+	protected _last() {
+		this.table()?.lastPage();
 	}
 }

@@ -98,8 +98,19 @@ export const routeMeta: RouteMeta = {
 				<code class="${hlmCode}">type</code>
 				(
 				<code class="${hlmCode}">string | number | date | boolean | select</code>
-				) and the grid renders the matching control — text operators, numeric and date ranges, boolean and option
-				selects — and resolves each filter to its operator before the adapter maps it. Filtering needs
+				) and the grid renders the matching control: text operators, a single value or a from/to pair (with
+				<code class="${hlmCode}">between</code>
+				) for numbers and dates, a boolean choice, and a single option or a checkbox list (with
+				<code class="${hlmCode}">in</code>
+				) for selects. Each filter is resolved to its operator and its value coerced to the declared type (
+				<code class="${hlmCode}">'30'</code>
+				becomes
+				<code class="${hlmCode}">30</code>
+				) before the adapter maps it, and date-only bounds cover the whole day, so
+				<code class="${hlmCode}">2024-01-31</code>
+				as an upper bound also matches that day's timestamps. Rename the operators with
+				<code class="${hlmCode}">operatorLabels</code>
+				. Filtering needs
 				<code class="${hlmCode}">columnFilteringFeature</code>
 				in your features, the toolbar search needs
 				<code class="${hlmCode}">globalFilteringFeature</code>
@@ -140,9 +151,18 @@ export const routeMeta: RouteMeta = {
 				<code class="${hlmCode}">resource</code>
 				(including SSR); filter keystrokes are debounced by
 				<code class="${hlmCode}">debounceMs</code>
-				(default 300ms) while page and sort apply immediately, and
-				<code class="${hlmCode}">serverFetch</code>
-				is reserved for a future opt-in fetch mode. A multi-column sort adds a
+				(default 300ms): typing never reaches the backend until it pauses, while page and sort apply immediately. The
+				pager offers
+				<code class="${hlmCode}">pageSizeOptions</code>
+				(default 10, 20, 50, 100), a page indicator computed from the adapter's
+				<code class="${hlmCode}">total</code>
+				, and first/previous/next/last buttons. The grid needs
+				<code class="${hlmCode}">columnVisibilityFeature</code>
+				and
+				<code class="${hlmCode}">rowPaginationFeature</code>
+				; sorting, filtering, search and
+				<code class="${hlmCode}">rowSelectionFeature</code>
+				(selected-row count) are opt-in. A multi-column sort adds a
 				<code class="${hlmCode}">sort</code>
 				list (
 				<code class="${hlmCode}">name:asc,email:desc</code>

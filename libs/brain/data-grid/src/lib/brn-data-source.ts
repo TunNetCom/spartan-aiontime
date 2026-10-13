@@ -55,13 +55,34 @@ export type BrnDataGridColumnMeta = {
 };
 
 /**
- * The operator assumed when a filter value arrives without one, so a plain text input keeps working
- * without the caller describing an operator.
+ * The operator a column filter starts with before the user picks one: ranges for numbers and dates,
+ * exact matches for booleans and selects, substring search for text.
  */
-export function brnDefaultFilterOperator(value: unknown): BrnFilterOperator {
-	if (Array.isArray(value)) return value.length === 2 ? 'between' : 'in';
+export function brnDefaultOperatorForType(type: BrnFilterType | undefined): BrnFilterOperator {
+	switch (type) {
+		case 'number':
+		case 'date':
+			return 'between';
+		case 'boolean':
+		case 'select':
+			return 'equals';
+		default:
+			return 'contains';
+	}
+}
+
+/**
+ * The operator assumed when a filter value arrives without one, so a plain text input keeps working
+ * without the caller describing an operator. A list is a set (`in`) unless the column is declared as a
+ * number or date, where a pair reads as a `[from, to]` range.
+ */
+export function brnDefaultFilterOperator(value: unknown, type?: BrnFilterType): BrnFilterOperator {
+	if (Array.isArray(value)) {
+		return value.length === 2 && (type === 'number' || type === 'date') ? 'between' : 'in';
+	}
 	if (typeof value === 'boolean' || typeof value === 'number') return 'equals';
 	if (value === undefined || value === null || value === '') return 'isEmpty';
+	if (type) return brnDefaultOperatorForType(type);
 	return 'contains';
 }
 
@@ -95,35 +116,144 @@ export function isBrnFilterSpec(value: unknown): value is BrnFilterSpec {
 }
 
 /**
- * Resolves a TanStack column-filter value into a state filter. Returns `undefined` when the filter
- * carries nothing to send, so an empty control never reaches the backend.
+ * Converts one raw filter value to the column's declared type, so every adapter receives `30` for a
+ * number column rather than the `'30'` an `<input>` produces. Returns `undefined` for a value that
+ * cannot be read as that type (e.g. `'abc'` in a number column), which drops it instead of sending a
+ * malformed literal to the backend.
  */
-export function toBrnFilter(id: string, raw: unknown): BrnFilter | undefined {
+export function brnCoerceFilterValue(value: unknown, type: BrnFilterType | undefined): unknown {
+	if (isEmptyBound(value)) return undefined;
+	switch (type) {
+		case 'number': {
+			const number = typeof value === 'number' ? value : Number(String(value).trim());
+			return Number.isFinite(number) ? number : undefined;
+		}
+		case 'boolean':
+			if (typeof value === 'boolean') return value;
+			if (value === 'true') return true;
+			if (value === 'false') return false;
+			return undefined;
+		case 'date':
+			if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value;
+			return String(value);
+		default:
+			return value;
+	}
+}
+
+/**
+ * Resolves a TanStack column-filter value into a state filter. Returns `undefined` when the filter
+ * carries nothing to send, so an empty control never reaches the backend. When the column's `type` is
+ * known, values are coerced to it and the filter carries it for the adapters.
+ */
+export function toBrnFilter(id: string, raw: unknown, type?: BrnFilterType): BrnFilter | undefined {
 	const spec = isBrnFilterSpec(raw) ? raw : undefined;
 	const value = spec ? spec.value : raw;
+	const typed = <T extends BrnFilter>(filter: T): T => (type ? { ...filter, type } : filter);
 
 	// Emptiness checks are only real when a control asked for them by name; a bare empty value is a
 	// cleared input, not an `isEmpty` filter.
 	if (spec?.operator === 'isEmpty' || spec?.operator === 'notEmpty') {
-		return { id, value: undefined, operator: spec.operator };
+		return typed({ id, value: undefined, operator: spec.operator });
 	}
-	if (value === undefined || value === null || value === '') return undefined;
+	if (isEmptyBound(value)) return undefined;
 
-	const operator = spec?.operator ?? brnDefaultFilterOperator(value);
+	const operator = spec?.operator ?? brnDefaultFilterOperator(value, type);
 
 	if (operator === 'between') {
-		const range = Array.isArray(value) ? value : [undefined, undefined];
-		const [from, to] = range;
-		if (isEmptyBound(from) && isEmptyBound(to)) return undefined;
-		return { id, value: range, operator };
+		const range = Array.isArray(value) ? value : [value, undefined];
+		const from = brnCoerceFilterValue(range[0], type);
+		const to = brnCoerceFilterValue(range[1], type);
+		if (from === undefined && to === undefined) return undefined;
+		return typed({ id, value: [from, to], operator });
 	}
 
 	if (operator === 'in') {
-		const list = (Array.isArray(value) ? value : [value]).filter((entry) => !isEmptyBound(entry));
-		return list.length === 0 ? undefined : { id, value: list, operator };
+		const list = (Array.isArray(value) ? value : [value])
+			.map((entry) => brnCoerceFilterValue(entry, type))
+			.filter((entry) => entry !== undefined);
+		return list.length === 0 ? undefined : typed({ id, value: list, operator });
 	}
 
-	return { id, value, operator };
+	const scalar = brnCoerceFilterValue(Array.isArray(value) ? value[0] : value, type);
+	return scalar === undefined ? undefined : typed({ id, value: scalar, operator });
+}
+
+/** A single bound an adapter writes: `field <operator> value`. */
+export type BrnComparison = { operator: 'eq' | 'gt' | 'gte' | 'lt' | 'lte'; value: unknown };
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The calendar day after a `YYYY-MM-DD` date, in the same format (computed in UTC, no DST drift). */
+function nextDay(date: string): string {
+	const [year, month, day] = date.split('-').map(Number);
+	return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
+/**
+ * Lowers an equality, comparison or range filter into the bounds an adapter writes, or `undefined`
+ * for operators that are not comparisons (`contains`, `in`, ...). Blank range bounds are dropped, so
+ * `between` can be open on either side.
+ *
+ * Date-only values (`YYYY-MM-DD`, what a date input produces) name a whole calendar day. Against a
+ * date-time field, `lte 2024-01-31` would stop at midnight and drop the rest of that day, so a
+ * date-only upper bound becomes `lt` the next day, `gt` becomes `gte` the next day, and `equals`
+ * becomes the `[day, next day)` window. Against a plain date field the result is equivalent.
+ */
+export function toBrnComparisons(filter: BrnFilter): BrnComparison[] | undefined {
+	const dateOnly = (value: unknown): value is string =>
+		filter.type === 'date' && typeof value === 'string' && DATE_ONLY.test(value);
+	const bound = (operator: BrnComparison['operator'], value: unknown): BrnComparison[] => {
+		if (isEmptyBound(value)) return [];
+		if (dateOnly(value)) {
+			if (operator === 'eq') {
+				return [
+					{ operator: 'gte', value },
+					{ operator: 'lt', value: nextDay(value) },
+				];
+			}
+			if (operator === 'lte') return [{ operator: 'lt', value: nextDay(value) }];
+			if (operator === 'gt') return [{ operator: 'gte', value: nextDay(value) }];
+		}
+		return [{ operator, value }];
+	};
+
+	switch (filter.operator) {
+		case 'equals':
+			return bound('eq', filter.value);
+		case 'gt':
+		case 'gte':
+		case 'lt':
+		case 'lte':
+			return bound(filter.operator, filter.value);
+		case 'between': {
+			const [from, to] = Array.isArray(filter.value) ? filter.value : [undefined, undefined];
+			return [...bound('gte', from), ...bound('lte', to)];
+		}
+		default:
+			return undefined;
+	}
+}
+
+type BrnColumnDefLike = {
+	id?: unknown;
+	accessorKey?: unknown;
+	columns?: readonly unknown[];
+	meta?: BrnDataGridColumnMeta;
+};
+
+/** Leaf column definitions, with group columns (`columns: [...]`) expanded. */
+export function brnFlattenColumnDefs(columns: readonly unknown[]): BrnColumnDefLike[] {
+	return columns.flatMap((column) => {
+		const def = column as BrnColumnDefLike;
+		return def.columns?.length ? brnFlattenColumnDefs(def.columns) : [def];
+	});
+}
+
+/** The id TanStack gives a column definition: its `id`, else its `accessorKey`. */
+export function brnColumnDefId(def: BrnColumnDefLike): string | undefined {
+	const id = def.id ?? def.accessorKey;
+	return id === undefined || id === null ? undefined : String(id);
 }
 
 /** Turns state filters back into the TanStack column filters the table state expects. */

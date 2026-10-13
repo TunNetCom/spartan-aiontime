@@ -204,3 +204,17 @@ describe('toRestFilterParams', () => {
 		expect(toRestFilterParams({ id: 'age', value: 30, operator: 'gte' })).toEqual({ 'filter[age][gte]': '30' });
 	});
 });
+
+describe('rest typed values', () => {
+	it('makes date-only ranges inclusive of the last day', () => {
+		expect(
+			toRestFilterParams({ id: 'created', value: ['2024-01-01', '2024-01-31'], operator: 'between', type: 'date' }),
+		).toEqual({ 'filter[created][gte]': '2024-01-01', 'filter[created][lt]': '2024-02-01' });
+	});
+	it('sends Date values as ISO strings', () => {
+		const value = new Date(Date.UTC(2024, 0, 31, 12));
+		expect(toRestFilterParams({ id: 'created', value, operator: 'gte', type: 'date' })).toEqual({
+			'filter[created][gte]': '2024-01-31T12:00:00.000Z',
+		});
+	});
+});
