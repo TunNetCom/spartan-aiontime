@@ -33,10 +33,12 @@
 ### Task 1: Brain operator + group types and coercion
 
 **Files:**
+
 - Modify: `libs/brain/data-grid/src/lib/brn-data-source.ts`
 - Test: `libs/brain/data-grid/src/lib/brn-data-source.spec.ts`
 
 **Interfaces:**
+
 - Consumes: existing `BrnFilterOperator`, `BRN_FILTER_OPERATORS`, `toBrnFilter`, `toBrnComparisons`.
 - Produces: `BrnFilterCondition`, `BrnCompositeSpec`, `BrnFilterGroup`, `toBrnFilterGroup(id, raw, type)`, extended `toBrnComparisons` (`notEquals` → `ne`).
 
@@ -50,7 +52,13 @@ describe('toBrnFilterGroup', () => {
 	it('joins two conditions with or', () => {
 		const group = toBrnFilterGroup(
 			'name',
-			{ logic: 'or', conditions: [{ operator: 'contains', value: 'a' }, { operator: 'contains', value: 'b' }] },
+			{
+				logic: 'or',
+				conditions: [
+					{ operator: 'contains', value: 'a' },
+					{ operator: 'contains', value: 'b' },
+				],
+			},
 			'string',
 		);
 		expect(group).toMatchObject({ id: 'name', logic: 'or' });
@@ -67,10 +75,24 @@ Expected: FAIL with `toBrnFilterGroup is not defined`.
 
 ```ts
 export type BrnFilterCondition = { operator?: BrnFilterOperator; value?: unknown };
-export type BrnCompositeSpec = { logic: 'and' | 'or'; conditions: [BrnFilterCondition, BrnFilterCondition?]; caseSensitive?: boolean };
-export type BrnFilterGroup = { id: string; logic: 'and' | 'or'; filters: [BrnFilter, BrnFilter?]; type?: BrnFilterType; caseSensitive?: boolean };
+export type BrnCompositeSpec = {
+	logic: 'and' | 'or';
+	conditions: [BrnFilterCondition, BrnFilterCondition?];
+	caseSensitive?: boolean;
+};
+export type BrnFilterGroup = {
+	id: string;
+	logic: 'and' | 'or';
+	filters: [BrnFilter, BrnFilter?];
+	type?: BrnFilterType;
+	caseSensitive?: boolean;
+};
 
-export function toBrnFilterGroup(id: string, raw: unknown, type?: BrnFilterType): BrnFilter | BrnFilterGroup | undefined {
+export function toBrnFilterGroup(
+	id: string,
+	raw: unknown,
+	type?: BrnFilterType,
+): BrnFilter | BrnFilterGroup | undefined {
 	if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && 'conditions' in raw) {
 		const spec = raw as BrnCompositeSpec;
 		const [c1, c2] = spec.conditions;
@@ -79,7 +101,13 @@ export function toBrnFilterGroup(id: string, raw: unknown, type?: BrnFilterType)
 		if (!f1 && !f2) return undefined;
 		if (f1 && !f2) return f1;
 		const filters = [f1, f2].filter((f): f is BrnFilter => !!f);
-		return { id, logic: spec.logic ?? 'and', filters: filters as [BrnFilter, BrnFilter?], ...(type ? { type } : {}), ...(spec.caseSensitive ? { caseSensitive: true } : {}) };
+		return {
+			id,
+			logic: spec.logic ?? 'and',
+			filters: filters as [BrnFilter, BrnFilter?],
+			...(type ? { type } : {}),
+			...(spec.caseSensitive ? { caseSensitive: true } : {}),
+		};
 	}
 	return toBrnFilter(id, raw, type);
 }
@@ -102,6 +130,7 @@ git commit -m "feat(data-grid): add composite filter group types" -m "And/Or wit
 ### Task 2: Adapter mappings for negations, null, case, groups
 
 **Files:**
+
 - Modify: `libs/brain/data-grid/src/lib/adapters/rest-adapter.ts`
 - Modify: `libs/brain/data-grid/src/lib/adapters/odata-adapter.ts`
 - Modify: `libs/brain/data-grid/src/lib/adapters/graphql-adapter.ts`
@@ -110,6 +139,7 @@ git commit -m "feat(data-grid): add composite filter group types" -m "And/Or wit
 - Test: `libs/brain/data-grid/src/lib/adapters/graphql-adapter.spec.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1 `BrnFilter`, `BrnFilterGroup`, `toBrnComparisons`.
 - Produces: `toRestFilterParams`, `toODataFilterExpression`, `toGraphQLFilterValue` handling new ops + `toRestFilterGroupParams` / group join.
 
@@ -216,10 +246,12 @@ git commit -m "feat(data-grid): map negated null and case filters" -m "REST ODat
 ### Task 3: Composite draft pure functions
 
 **Files:**
+
 - Create: `libs/brain/data-grid/src/lib/brn-column-filter-draft.ts` (apply `C:\Users\admin\Downloads\brn-column-filter.patch` first, then extend)
 - Create: `libs/brain/data-grid/src/lib/brn-column-filter-draft.spec.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1 `toBrnFilterGroup`, existing `brnDraft*` single fns from patch.
 - Produces: `BrnCompositeDraft`, `brnCompositeFromRaw`, `brnCompositeSetLogic`, `brnCompositeSetCondition`, `brnCompositeToGroup`.
 
@@ -236,7 +268,12 @@ import { brnCompositeToGroup } from './brn-column-filter-draft';
 describe('brnCompositeToGroup', () => {
 	it('drops an empty second condition to single', () => {
 		const group = brnCompositeToGroup(
-			{ logic: 'or', first: { operator: 'contains', value: 'a' }, second: { operator: 'contains', value: '' }, caseSensitive: false },
+			{
+				logic: 'or',
+				first: { operator: 'contains', value: 'a' },
+				second: { operator: 'contains', value: '' },
+				caseSensitive: false,
+			},
 			'string',
 		);
 		expect(group).toMatchObject({ operator: 'contains', value: 'a' });
@@ -253,7 +290,12 @@ Expected: FAIL with `brnCompositeToGroup is not defined`.
 
 ```ts
 import { toBrnFilterGroup } from './brn-data-source';
-export type BrnCompositeDraft = { logic: 'and' | 'or'; first: BrnFilterDraft; second?: BrnFilterDraft; caseSensitive: boolean };
+export type BrnCompositeDraft = {
+	logic: 'and' | 'or';
+	first: BrnFilterDraft;
+	second?: BrnFilterDraft;
+	caseSensitive: boolean;
+};
 
 export function brnCompositeFromRaw(raw: unknown, meta: BrnColumnFilterMeta): BrnCompositeDraft {
 	if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && 'conditions' in raw) {
@@ -272,18 +314,38 @@ export function brnCompositeSetLogic(draft: BrnCompositeDraft, logic: 'and' | 'o
 	return { ...draft, logic };
 }
 
-export function brnCompositeSetCondition(draft: BrnCompositeDraft, index: 0 | 1, next: BrnFilterDraft): BrnCompositeDraft {
+export function brnCompositeSetCondition(
+	draft: BrnCompositeDraft,
+	index: 0 | 1,
+	next: BrnFilterDraft,
+): BrnCompositeDraft {
 	return index === 0 ? { ...draft, first: next } : { ...draft, second: next };
 }
 
-export function brnCompositeToGroup(draft: BrnCompositeDraft, type?: BrnFilterType): BrnFilter | BrnFilterGroup | undefined {
+export function brnCompositeToGroup(
+	draft: BrnCompositeDraft,
+	type?: BrnFilterType,
+): BrnFilter | BrnFilterGroup | undefined {
 	const second = draft.second && brnDraftToSpec(draft.second, type) ? draft.second : undefined;
 	if (!second) {
 		const single = brnDraftToSpec(draft.first, type);
 		if (!single) return undefined;
-		return draft.caseSensitive ? { id: 'draft', operator: single.operator, value: single.value, type, caseSensitive: true } as BrnFilter : ({ id: 'draft', ...single, type } as BrnFilter);
+		return draft.caseSensitive
+			? ({ id: 'draft', operator: single.operator, value: single.value, type, caseSensitive: true } as BrnFilter)
+			: ({ id: 'draft', ...single, type } as BrnFilter);
 	}
-	return toBrnFilterGroup('draft', { logic: draft.logic, conditions: [{ operator: draft.first.operator, value: draft.first.value }, { operator: second.operator, value: second.value }], caseSensitive: draft.caseSensitive || undefined }, type) as BrnFilter | BrnFilterGroup | undefined;
+	return toBrnFilterGroup(
+		'draft',
+		{
+			logic: draft.logic,
+			conditions: [
+				{ operator: draft.first.operator, value: draft.first.value },
+				{ operator: second.operator, value: second.value },
+			],
+			caseSensitive: draft.caseSensitive || undefined,
+		},
+		type,
+	) as BrnFilter | BrnFilterGroup | undefined;
 }
 ```
 
@@ -304,6 +366,7 @@ git commit -m "feat(data-grid): add composite filter draft" -m "And/Or wrapper r
 ### Task 4: BrnColumnFilter directive + flushFilters
 
 **Files:**
+
 - Create: `libs/brain/data-grid/src/lib/brn-column-filter.ts` (from patch, then extend with `index` + logic + case)
 - Modify: `libs/brain/data-grid/src/lib/brn-data-grid-state.ts` (`flushFilters`)
 - Modify: `libs/brain/data-grid/src/lib/brn-data-grid.ts` (`flushFilters`)
@@ -311,6 +374,7 @@ git commit -m "feat(data-grid): add composite filter draft" -m "And/Or wrapper r
 - Test: `libs/brain/data-grid/src/lib/brn-column-filter.spec.ts`
 
 **Interfaces:**
+
 - Consumes: Task 3 composite draft API, Task 1 `toBrnFilterGroup`.
 - Produces: `BrnColumnFilter` (`draft`, `canApply`, `isActive`, `open/reset/setOperator/setValue/setRange/toggleOption(index)/setLogic/setCaseSensitive/apply/clear`), `BrnDataGrid.flushFilters()`.
 
@@ -370,10 +434,12 @@ git commit -m "feat(data-grid): add BrnColumnFilter apply flow" -m "Composite dr
 ### Task 5: Helm HlmDataGridColumnFilter popover
 
 **Files:**
+
 - Create: `libs/helm/data-grid/src/lib/hlm-data-grid-column-filter.ts`
 - Create: `libs/helm/data-grid/src/lib/hlm-data-grid-filter-labels.ts`
 
 **Interfaces:**
+
 - Consumes: Task 4 `BrnColumnFilter`; `hlm-popover`, `hlmBtn`, `hlm-native-select`, `hlmInput`, `hlm-checkbox`.
 - Produces: `HlmDataGridColumnFilter` (`[column]`, `[labels]`), `HLM_DATA_GRID_OPERATOR_LABELS`.
 
@@ -410,17 +476,45 @@ import { HlmNativeSelectImports } from '@spartan-ng/helm/native-select';
 import { HlmPopoverImports } from '@spartan-ng/helm/popover';
 import { hlm } from '@spartan-ng/helm/utils';
 
-export type HlmDataGridFilterLabels = { operator?: string; value?: string; from?: string; to?: string; clear?: string; apply?: string; simple?: string; advanced?: string; and?: string; or?: string; caseSensitive?: string };
+export type HlmDataGridFilterLabels = {
+	operator?: string;
+	value?: string;
+	from?: string;
+	to?: string;
+	clear?: string;
+	apply?: string;
+	simple?: string;
+	advanced?: string;
+	and?: string;
+	or?: string;
+	caseSensitive?: string;
+};
 
 @Component({
 	selector: 'hlm-data-grid-column-filter',
 	hostDirectives: [{ directive: BrnColumnFilter, inputs: ['brnColumnFilter: column'] }],
-	imports: [...HlmButtonImports, ...HlmCheckboxImports, ...HlmInputImports, ...HlmNativeSelectImports, ...HlmPopoverImports],
+	imports: [
+		...HlmButtonImports,
+		...HlmCheckboxImports,
+		...HlmInputImports,
+		...HlmNativeSelectImports,
+		...HlmPopoverImports,
+	],
 	changeDetection: ChangeDetectionStrategy.OnPush,
 	template: `
-		<button hlmBtn variant="ghost" size="icon-xs" data-slot="data-grid-filter-trigger" [hlmPopoverTriggerFor]="panel" [attr.aria-label]="labels().filter ?? 'Filter'" [attr.data-active]="filter.isActive()">
+		<button
+			hlmBtn
+			variant="ghost"
+			size="icon-xs"
+			data-slot="data-grid-filter-trigger"
+			[hlmPopoverTriggerFor]="panel"
+			[attr.aria-label]="labels().filter ?? 'Filter'"
+			[attr.data-active]="filter.isActive()"
+		>
 			<ng-icon name="lucideFilter" />
-			@if (filter.isActive()) { <span data-slot="data-grid-filter-dot" aria-hidden="true"></span> }
+			@if (filter.isActive()) {
+				<span data-slot="data-grid-filter-dot" aria-hidden="true"></span>
+			}
 		</button>
 		<hlm-popover-content #panel="hlmPopoverContent" *hlmPopoverPortal class="w-72 p-3" (closed)="filter.reset()">
 			<!-- operator select + value control moved from HlmDataGrid, bound to filter.draft()/filter.set*(value, index); Simple/Advanced switch; And/Or toggle; Clear/Apply -->
@@ -451,10 +545,12 @@ git commit -m "feat(data-grid): add column filter popover" -m "Trigger plus pane
 ### Task 6: HlmDataGrid header swap and chip groups
 
 **Files:**
+
 - Modify: `libs/helm/data-grid/src/lib/hlm-data-grid.ts`
 - Test: `libs/helm/data-grid/src/lib/hlm-data-grid.spec.ts`
 
 **Interfaces:**
+
 - Consumes: Task 5 component + labels.
 - Produces: slim header (`sort + filter button`), group chips.
 
@@ -480,7 +576,7 @@ Replace the `@if (showColumnFilters() && _filterMeta(header); as meta)` tall `<d
 
 ```html
 @if (showColumnFilters() && _filterMeta(header)) {
-	<hlm-data-grid-column-filter [column]="header.column" [labels]="_filterLabels()" />
+<hlm-data-grid-column-filter [column]="header.column" [labels]="_filterLabels()" />
 }
 ```
 
@@ -501,6 +597,7 @@ git commit -m "refactor(data-grid): swap header filters for popover" -m "Delete 
 ### Task 7: CLI templates, deps, docs snapshot
 
 **Files:**
+
 - Modify: `libs/cli/src/generators/ui/primitive-deps.ts` (add `'popover'` to `data-grid` list)
 - Create: `libs/cli/src/generators/ui/libs/data-grid/files/lib/hlm-data-grid-column-filter.ts.template`
 - Create: `libs/cli/src/generators/ui/libs/data-grid/files/lib/hlm-data-grid-filter-labels.ts.template`
@@ -508,6 +605,7 @@ git commit -m "refactor(data-grid): swap header filters for popover" -m "Delete 
 - Test: `libs/cli/src/generators/ui/primitive-deps.spec.ts`, `libs/tools/src/executors/docs/generate-ui-docs/executor.spec.ts`
 
 **Interfaces:**
+
 - Consumes: Tasks 5–6 helm sources.
 - Produces: scaffold parity + updated snapshot.
 
@@ -543,11 +641,13 @@ git commit -m "feat(data-grid): scaffold filter popover in CLI" -m "Popover dep 
 ### Task 8: Storybook stories + Cypress e2e + helm spec rewrite
 
 **Files:**
+
 - Modify: `apps/ui-storybook/stories/data-grid.stories.ts`
 - Modify: `apps/ui-storybook-e2e/src/integration/data-grid/data-grid.cy.ts`
 - Modify: `libs/helm/data-grid/src/lib/hlm-data-grid.spec.ts`
 
 **Interfaces:**
+
 - Consumes: Tasks 5–6 component.
 - Produces: simple + advanced coverage per type.
 

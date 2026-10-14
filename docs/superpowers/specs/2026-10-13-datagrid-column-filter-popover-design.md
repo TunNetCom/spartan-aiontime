@@ -17,7 +17,7 @@ Scope: Step 3 only — helm popover + repo ripple, with full Radzen parity (adva
 - Brain `brn-data-source.ts` holds the filter domain: `BrnFilterOperator`, `BRN_FILTER_OPERATORS` per type, `meta.filter` (`BrnColumnFilterMeta`), `BrnFilterSpec`, `toBrnFilter` with coercion, `toBrnComparisons` with date-day windows, adapters map exactly one operator per column.
 - Helm `hlm-data-grid.ts` renders per filterable column an always-visible block: operator `hlm-native-select` + value control by `meta.type` (`string` text, `number`/`date` single or `between` from/to, `boolean` choice, `select` single or `in` checkbox list). Handlers read sibling DOM values to avoid stale TanStack snapshots; every keystroke writes table state → chips update + debounced fetch.
 - Popover primitive exists (`libs/helm/popover`) and date-picker pattern is `<hlm-popover-content *hlmPopoverPortal>` + `hlmPopoverTrigger` / `hlmPopoverTriggerFor` — the filter popover follows it.
-- Patch `brn-column-filter.patch` adds `brn-column-filter-draft.ts` (pure `BrnFilterDraft` fns reusing `toBrnFilter`), `BrnColumnFilter` directive (draft/canApply/isActive/open/reset/set*/apply/clear), `flushFilters()` on `injectBrnDataGrid`/`BrnDataGrid`, index exports. It is the steps 1–2 baseline for this spec.
+- Patch `brn-column-filter.patch` adds `brn-column-filter-draft.ts` (pure `BrnFilterDraft` fns reusing `toBrnFilter`), `BrnColumnFilter` directive (draft/canApply/isActive/open/reset/set\*/apply/clear), `flushFilters()` on `injectBrnDataGrid`/`BrnDataGrid`, index exports. It is the steps 1–2 baseline for this spec.
 
 ## 3. Approach selected: composite filter value per column
 
