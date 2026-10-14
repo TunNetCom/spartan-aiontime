@@ -1,0 +1,201 @@
+name: publish-azure-dev
+
+# Manual publish of the built npm packages (brain/cli/mcp)
+# to the private Azure Artifacts feed.
+#
+# Development versions are generated automatically:
+#   0.0.0-dev.101
+#   0.0.0-dev.102
+#
+# Consumers install using:
+#   npm install @spartan-ng/brain-aion-time@dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'npm dist-tag'
+        default: 'dev'
+        required: true
+        type: string
+
+      name-suffix:
+        description: 'Suffix for published names (e.g. -aion-time)'
+        default: '-aion-time'
+        required: false
+        type: string
+
+      dry-run:
+        description: 'Preview without publishing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-azure-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AZURE_REGISTRY: https://pkgs.dev.azure.com/TunNetCom/Silk_Road_ERP/_packaging/sre-npm-feed/npm/registry/
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup
+
+      # Build packages
+      - name: Build publishable libs
+        run: pnpm nx run-many -t build -p brain cli mcp --parallel=1
+
+      # Generate development version and rename packages
+      - name: Apply name suffix and development version
+        shell: bash
+        env:
+          SUFFIX: ${{ inputs.name-suffix }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          if [ -n "$SUFFIX" ] && [[ ! "$SUFFIX" =~ ^-[a-z0-9-]+$ ]]; then
+            echo "::error::name-suffix must be empty or lowercase with hyphens. Got: $SUFFIX"
+            exit 1
+          fi
+
+          node <<'EOF'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const suffix = process.env.SUFFIX || '';
+          const buildNumber = process.env.BUILD_NUMBER;
+
+          const devVersion = `0.0.0-dev.${buildNumber}`;
+
+          const pkgs = ['brain', 'cli', 'mcp'];
+          const oldNames = pkgs.map((p) => `@spartan-ng/${p}`);
+
+          const newName = (n) => (
+            oldNames.includes(n) ? n + suffix : n
+          );
+
+          console.log(`Development version: ${devVersion}`);
+
+          // 1. Update package names, versions and cross-dependencies.
+          for (const p of pkgs) {
+            const f = `dist/libs/${p}/package.json`;
+            const pkg = JSON.parse(fs.readFileSync(f, 'utf8'));
+
+            pkg.name = newName(pkg.name);
+            pkg.version = devVersion;
+
+            for (const field of [
+              'dependencies',
+              'peerDependencies',
+              'devDependencies',
+              'optionalDependencies'
+            ]) {
+              if (!pkg[field]) continue;
+
+              for (const key of Object.keys(pkg[field])) {
+                if (oldNames.includes(key)) {
+                  pkg[field][newName(key)] = pkg[field][key];
+                  delete pkg[field][key];
+                }
+              }
+            }
+
+            // Azure Artifacts does not accept this publishConfig.
+            delete pkg.publishConfig;
+            delete pkg.private;
+
+            fs.writeFileSync(f, JSON.stringify(pkg, null, 2) + '\n');
+
+            console.log(`${pkg.name}@${pkg.version}`);
+          }
+
+          // 2. Rewrite package specifiers in built files.
+          if (suffix) {
+            const exts = new Set([
+              '.js',
+              '.mjs',
+              '.cjs',
+              '.ts',
+              '.json',
+              '.md'
+            ]);
+
+            const walk = (dir) => {
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, e.name);
+
+                if (e.isDirectory()) {
+                  walk(full);
+                } else if (
+                  e.name !== 'package.json' &&
+                  [...exts].some(ext => full.endsWith(ext))
+                ) {
+                  const s = fs.readFileSync(full, 'utf8');
+                  let out = s;
+
+                  for (const n of oldNames) {
+                    out = out.split(n).join(n + suffix);
+                  }
+
+                  if (out !== s) {
+                    fs.writeFileSync(full, out);
+                  }
+                }
+              }
+            };
+
+            for (const p of pkgs) {
+              walk(`dist/libs/${p}`);
+            }
+          }
+          EOF
+
+      # Validate Azure PAT
+      - name: Require Azure PAT secret
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.AZURE_ARTIFACTS_PAT }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::AZURE_ARTIFACTS_PAT secret is missing."
+            echo "Add it under GitHub repo Settings > Secrets > Actions."
+            exit 1
+          fi
+
+      # Publish packages
+      - name: Publish to Azure feed
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.AZURE_ARTIFACTS_PAT }}
+          NPM_TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          printf '%s\n' \
+            "@spartan-ng:registry=${AZURE_REGISTRY}" \
+            "always-auth=true" \
+            "//pkgs.dev.azure.com/TunNetCom/Silk_Road_ERP/_packaging/sre-npm-feed/npm/registry/:_authToken=${NODE_AUTH_TOKEN}" \
+            "//pkgs.dev.azure.com/TunNetCom/Silk_Road_ERP/_packaging/sre-npm-feed/npm/:_authToken=${NODE_AUTH_TOKEN}" \
+            > .npmrc
+
+          args=(
+            --registry "$AZURE_REGISTRY"
+            --tag "$NPM_TAG"
+          )
+
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+
+          for p in brain cli mcp; do
+            echo "Publishing $p..."
+            npm publish "dist/libs/$p" "${args[@]}"
+          done
