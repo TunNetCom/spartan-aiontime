@@ -3607,6 +3607,19 @@ exports[`generate-ui-docs executor > produces stable output 1`] = `
   },
   "data-grid": {
     "brain": {
+      "BrnColumnFilter": {
+        "exportAs": "brnColumnFilter",
+        "inputs": [
+          {
+            "name": "brnColumnFilter",
+            "required": true,
+            "type": "BrnFilterableColumn",
+          },
+        ],
+        "models": [],
+        "outputs": [],
+        "selector": "[brnColumnFilter]",
+      },
       "BrnDataGrid": {
         "exportAs": "brnDataGrid",
         "inputs": [
@@ -3773,6 +3786,33 @@ exports[`generate-ui-docs executor > produces stable output 1`] = `
           },
         ],
         "selector": "hlm-data-grid",
+      },
+      "HlmDataGridColumnFilter": {
+        "inputs": [
+          {
+            "name": "column",
+            "required": true,
+            "type": "BrnFilterableColumn",
+          },
+          {
+            "name": "labels",
+            "required": false,
+            "type": "HlmDataGridFilterLabels",
+          },
+          {
+            "name": "operatorLabels",
+            "required": false,
+            "type": "Partial<Record<BrnFilterOperator, string>>",
+          },
+          {
+            "name": "class",
+            "required": false,
+            "type": "unknown",
+          },
+        ],
+        "models": [],
+        "outputs": [],
+        "selector": "hlm-data-grid-column-filter",
       },
       "HlmDataGridPagination": {
         "inputs": [

@@ -47,6 +47,10 @@ describe('CLI primitive registry', () => {
 		});
 	});
 
+	it('declares popover as a data-grid dependency', () => {
+		expect(primitiveDependencies['data-grid']).toContain('popover');
+	});
+
 	// Drift guard: every `<importAlias>/<primitive>` a template imports must be reachable from that
 	// primitive's declared deps, else scaffolding it alone generates imports to a helm library that was
 	// never created - which is how `command` shipped importing undeclared `input-group` (#1618).

@@ -31,6 +31,7 @@ export const primitiveDependencies: Record<Primitive, Primitive[]> = {
 		'field',
 		'input',
 		'native-select',
+		'popover',
 		'skeleton',
 		'table',
 	],

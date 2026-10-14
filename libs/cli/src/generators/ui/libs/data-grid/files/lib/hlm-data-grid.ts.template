@@ -2,31 +2,28 @@ import { ChangeDetectionStrategy, Component, computed, input, output, viewChild 
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideArrowDown, lucideArrowUp, lucideChevronsUpDown, lucideX } from '@ng-icons/lucide';
 import {
-	BRN_FILTER_OPERATORS,
 	BrnDataGrid,
 	brnColumnDefId,
-	brnDefaultFilterOperator,
-	brnDefaultOperatorForType,
 	brnFlattenColumnDefs,
-	isBrnFilterSpec,
+	isFilterGroup,
 	type BrnColumnFilterMeta,
 	type BrnDataAdapter,
 	type BrnFilter,
+	type BrnFilterGroup,
 	type BrnFilterOperator,
-	type BrnFilterSpec,
 	type BrnGridState,
 } from '@spartan-ng/brain/data-grid';
 import { HlmAlertImports } from '<%- importAlias %>/alert';
 import { HlmBadgeImports } from '<%- importAlias %>/badge';
 import { HlmButtonImports } from '<%- importAlias %>/button';
-import { HlmCheckboxImports } from '<%- importAlias %>/checkbox';
 import { HlmFieldImports } from '<%- importAlias %>/field';
 import { HlmInputImports } from '<%- importAlias %>/input';
-import { HlmNativeSelectImports } from '<%- importAlias %>/native-select';
 import { HlmSkeletonImports } from '<%- importAlias %>/skeleton';
 import { HlmTableImports } from '<%- importAlias %>/table';
 import { hlm } from '<%- importAlias %>/utils';
 import { FlexRender, type ColumnDef, type RowData, type TableFeatures } from '@tanstack/angular-table';
+import { HlmDataGridColumnFilter } from './hlm-data-grid-column-filter';
+import { HLM_DATA_GRID_OPERATOR_LABELS, type HlmDataGridFilterLabels } from './hlm-data-grid-filter-labels';
 import { HlmDataGridPagination } from './hlm-data-grid-pagination';
 
 let hlmDataGridNextId = 0;
@@ -58,17 +55,16 @@ let hlmDataGridNextId = 0;
 	imports: [
 		BrnDataGrid,
 		HlmDataGridPagination,
+		HlmDataGridColumnFilter,
 		FlexRender,
 		NgIcon,
 		...HlmTableImports,
 		...HlmButtonImports,
-		...HlmCheckboxImports,
 		...HlmAlertImports,
 		...HlmSkeletonImports,
 		...HlmInputImports,
 		...HlmBadgeImports,
 		...HlmFieldImports,
-		...HlmNativeSelectImports,
 	],
 	providers: [provideIcons({ lucideArrowUp, lucideArrowDown, lucideChevronsUpDown, lucideX })],
 	changeDetection: ChangeDetectionStrategy.OnPush,
@@ -177,141 +173,8 @@ let hlmDataGridNextId = 0;
 												<div [innerHTML]="headerText"></div>
 											</ng-container>
 										}
-										@if (showColumnFilters() && _filterMeta(header); as meta) {
-											<div
-												data-slot="data-grid-filter"
-												[attr.data-column]="header.column.id"
-												class="flex flex-col gap-1 pt-1"
-												(click)="$event.stopPropagation()"
-											>
-												<label class="sr-only" [for]="_operatorId(header)">
-													{{ _metaLabel(header, meta) }} {{ operatorText() }}
-												</label>
-												<hlm-native-select
-													data-slot="data-grid-operator"
-													[selectId]="_operatorId(header)"
-													size="sm"
-													[value]="_spec(header).operator ?? ''"
-													(change)="_onOperator(header, meta, $event)"
-												>
-													@for (op of _operators(meta); track op) {
-														<option hlmNativeSelectOption [value]="op">{{ _operatorLabel(op) }}</option>
-													}
-												</hlm-native-select>
-												@if (_isEmptiness(_spec(header).operator)) {
-													<!-- Emptiness checks carry no value. -->
-												} @else if (meta.type === 'number' || meta.type === 'date') {
-													@if (_spec(header).operator === 'between') {
-														<div class="flex items-center gap-1">
-															<label class="sr-only" [for]="_valueId(header, 'from')">
-																{{ _metaLabel(header, meta) }} {{ fromText() }}
-															</label>
-															<input
-																hlmInput
-																data-slot="data-grid-value-from"
-																[id]="_valueId(header, 'from')"
-																[type]="meta.type"
-																class="w-full"
-																[value]="_range(header)[0]"
-																[placeholder]="fromText()"
-																(input)="_onRange(header, meta, $event)"
-															/>
-															<label class="sr-only" [for]="_valueId(header, 'to')">
-																{{ _metaLabel(header, meta) }} {{ toText() }}
-															</label>
-															<input
-																hlmInput
-																data-slot="data-grid-value-to"
-																[id]="_valueId(header, 'to')"
-																[type]="meta.type"
-																class="w-full"
-																[value]="_range(header)[1]"
-																[placeholder]="toText()"
-																(input)="_onRange(header, meta, $event)"
-															/>
-														</div>
-													} @else {
-														<label class="sr-only" [for]="_valueId(header)">
-															{{ _metaLabel(header, meta) }} {{ valueText() }}
-														</label>
-														<input
-															hlmInput
-															data-slot="data-grid-value"
-															[id]="_valueId(header)"
-															[type]="meta.type"
-															class="w-full"
-															[value]="_textValue(header)"
-															(input)="_onText(header, meta, $event)"
-														/>
-													}
-												} @else if (meta.type === 'boolean') {
-													<label class="sr-only" [for]="_valueId(header)">
-														{{ _metaLabel(header, meta) }} {{ valueText() }}
-													</label>
-													<hlm-native-select
-														data-slot="data-grid-value"
-														[selectId]="_valueId(header)"
-														size="sm"
-														[value]="_booleanValue(header)"
-														(change)="_onChoice(header, meta, $event)"
-													>
-														<option hlmNativeSelectOption value="">{{ allText() }}</option>
-														<option hlmNativeSelectOption value="true">{{ trueText() }}</option>
-														<option hlmNativeSelectOption value="false">{{ falseText() }}</option>
-													</hlm-native-select>
-												} @else if (meta.type === 'select' && _spec(header).operator === 'in') {
-													<div
-														data-slot="data-grid-value-set"
-														role="group"
-														class="flex flex-col gap-1"
-														[attr.aria-label]="_metaLabel(header, meta)"
-													>
-														@for (option of meta.options ?? []; track $index) {
-															<div class="flex items-center gap-2">
-																<hlm-checkbox
-																	[inputId]="_valueId(header, 'option-' + $index)"
-																	[checked]="_isChosen(header, option.value)"
-																	(checkedChange)="_onToggleOption(header, option.value, $event)"
-																/>
-																<label class="text-sm font-normal" [for]="_valueId(header, 'option-' + $index)">
-																	{{ option.label }}
-																</label>
-															</div>
-														}
-													</div>
-												} @else if (meta.type === 'select') {
-													<label class="sr-only" [for]="_valueId(header)">
-														{{ _metaLabel(header, meta) }} {{ valueText() }}
-													</label>
-													<hlm-native-select
-														data-slot="data-grid-value"
-														[selectId]="_valueId(header)"
-														size="sm"
-														[value]="_textValue(header)"
-														(change)="_onChoice(header, meta, $event)"
-													>
-														<option hlmNativeSelectOption value="">{{ allText() }}</option>
-														@for (option of meta.options ?? []; track $index) {
-															<option hlmNativeSelectOption [value]="_optionValue(option.value)">
-																{{ option.label }}
-															</option>
-														}
-													</hlm-native-select>
-												} @else {
-													<label class="sr-only" [for]="_valueId(header)">
-														{{ _metaLabel(header, meta) }} {{ valueText() }}
-													</label>
-													<input
-														hlmInput
-														data-slot="data-grid-value"
-														[id]="_valueId(header)"
-														type="text"
-														class="w-full"
-														[value]="_textValue(header)"
-														(input)="_onText(header, meta, $event)"
-													/>
-												}
-											</div>
+										@if (showColumnFilters() && _filterMeta(header)) {
+											<hlm-data-grid-column-filter [column]="header.column" [labels]="_filterLabels()" />
 										}
 									}
 								</th>
@@ -507,6 +370,18 @@ export class HlmDataGrid<TData extends RowData> {
 
 	protected readonly _operatorLabels = computed(() => ({ ...HLM_DATA_GRID_OPERATOR_LABELS, ...this.operatorLabels() }));
 
+	/** The grid's text inputs mapped onto the column filter popover's labels. */
+	protected readonly _filterLabels = computed<HlmDataGridFilterLabels>(() => ({
+		operator: this.operatorText(),
+		value: this.valueText(),
+		from: this.fromText(),
+		to: this.toText(),
+		all: this.allText(),
+		true: this.trueText(),
+		false: this.falseText(),
+		operatorLabels: this._operatorLabels(),
+	}));
+
 	private readonly _grid = viewChild.required(BrnDataGrid);
 
 	/**
@@ -586,165 +461,12 @@ export class HlmDataGrid<TData extends RowData> {
 		return meta.label ?? header.column.id;
 	}
 
-	protected _operators(meta: BrnColumnFilterMeta): readonly BrnFilterOperator[] {
-		return meta.operators ?? BRN_FILTER_OPERATORS[meta.type];
-	}
-
 	protected _operatorLabel(operator: BrnFilterOperator): string {
 		return this._operatorLabels()[operator] ?? operator;
 	}
 
-	/** The operator a column starts on: the type default when offered, else the first offered one. */
-	protected _initialOperator(meta: BrnColumnFilterMeta): BrnFilterOperator {
-		const operators = this._operators(meta);
-		const preferred = brnDefaultOperatorForType(meta.type);
-		return operators.includes(preferred) ? preferred : (operators[0] ?? preferred);
-	}
-
-	protected _spec(header: any): BrnFilterSpec {
-		const raw = header.column.getFilterValue();
-		const meta = this._filterMeta(header);
-		const fallback = meta ? this._initialOperator(meta) : 'contains';
-		if (isBrnFilterSpec(raw)) return { ...raw, operator: raw.operator ?? fallback };
-		if (raw === undefined || raw === null || raw === '') return { operator: fallback, value: undefined };
-		return { operator: brnDefaultFilterOperator(raw, meta?.type), value: raw };
-	}
-
-	protected _isEmptiness(operator: BrnFilterOperator | undefined): boolean {
-		return operator === 'isEmpty' || operator === 'notEmpty';
-	}
-
-	protected _operatorId(header: any): string {
-		return `${this._idPrefix}-filter-${header.column.id}-operator`;
-	}
-
-	protected _valueId(header: any, suffix?: string): string {
-		const base = `${this._idPrefix}-filter-${header.column.id}`;
-		return suffix ? `${base}-${suffix}` : base;
-	}
-
-	protected _textValue(header: any): string {
-		const value = this._spec(header).value;
-		const scalar = Array.isArray(value) ? value[0] : value;
-		return scalar === undefined || scalar === null ? '' : this._optionValue(scalar);
-	}
-
-	protected _range(header: any): [string, string] {
-		const value = this._spec(header).value;
-		const text = (entry: unknown) => (entry === undefined || entry === null ? '' : String(entry));
-		if (Array.isArray(value)) return [text(value[0]), text(value[1])];
-		return [text(value), ''];
-	}
-
-	protected _booleanValue(header: any): string {
-		const value = this._spec(header).value;
-		return value === true || value === 'true' ? 'true' : value === false || value === 'false' ? 'false' : '';
-	}
-
 	protected _optionValue(value: unknown): string {
 		return value instanceof Date ? value.toISOString() : String(value ?? '');
-	}
-
-	/** Maps a `<select>` string back to the option's own value, so `1` stays a number. */
-	protected _optionFor(meta: BrnColumnFilterMeta, choice: string): unknown {
-		const option = (meta.options ?? []).find((entry) => this._optionValue(entry.value) === choice);
-		return option ? option.value : choice;
-	}
-
-	protected _chosen(header: any): unknown[] {
-		const value = this._spec(header).value;
-		if (value === undefined || value === null || value === '') return [];
-		return Array.isArray(value) ? value : [value];
-	}
-
-	protected _isChosen(header: any, value: unknown): boolean {
-		const key = this._optionValue(value);
-		return this._chosen(header).some((entry) => this._optionValue(entry) === key);
-	}
-
-	/**
-	 * The filter control root of the event target. Filter handlers read sibling control values from
-	 * the DOM rather than from the TanStack table state: the table snapshot only refreshes on change
-	 * detection, so two writes in the same tick (operator then value, range from then to) would merge
-	 * the second write against the stale first one and drop data.
-	 */
-	protected _filterRoot(event: Event): HTMLElement | null {
-		return (event.target as HTMLElement)?.closest?.('[data-slot="data-grid-filter"]');
-	}
-
-	protected _rootOperator(root: HTMLElement | null, meta: BrnColumnFilterMeta): BrnFilterOperator {
-		const select = root?.querySelector('[data-slot="data-grid-operator"] select') as HTMLSelectElement | null;
-		const operator = select?.value as BrnFilterOperator | '';
-		return operator || this._initialOperator(meta);
-	}
-
-	/** The value(s) currently typed into a column's controls, whichever shape is on screen. */
-	protected _rootValues(root: HTMLElement | null): [string | undefined, string | undefined] {
-		const read = (slot: string) =>
-			(root?.querySelector(`input[data-slot="${slot}"], [data-slot="${slot}"] select`) as HTMLInputElement | null)
-				?.value || undefined;
-		const single = read('data-grid-value');
-		if (single !== undefined) return [single, undefined];
-		return [read('data-grid-value-from'), read('data-grid-value-to')];
-	}
-
-	protected _onOperator(header: any, meta: BrnColumnFilterMeta, event: Event): void {
-		const operator = (event.target as HTMLSelectElement).value as BrnFilterOperator;
-		if (this._isEmptiness(operator)) {
-			header.column.setFilterValue({ operator, value: undefined });
-			return;
-		}
-		const [first, second] = this._rootValues(this._filterRoot(event));
-
-		if (operator === 'between') {
-			header.column.setFilterValue({ operator, value: (first ?? second) ? [first, second] : undefined });
-			return;
-		}
-		if (operator === 'in') {
-			// A set keeps whatever was chosen before; the checkbox list takes over from here.
-			const chosen = this._chosen(header);
-			header.column.setFilterValue({ operator, value: chosen.length ? chosen : undefined });
-			return;
-		}
-		const single = first ?? second;
-		if (meta.type === 'select' && this._spec(header).operator === 'in') {
-			// Leaving a set for a single choice keeps its first entry.
-			header.column.setFilterValue({ operator, value: this._chosen(header)[0] });
-			return;
-		}
-		const value = single === undefined ? undefined : meta.type === 'select' ? this._optionFor(meta, single) : single;
-		header.column.setFilterValue({ operator, value });
-	}
-
-	protected _onText(header: any, meta: BrnColumnFilterMeta, event: Event): void {
-		const operator = this._rootOperator(this._filterRoot(event), meta);
-		const value = (event.target as HTMLInputElement).value;
-		header.column.setFilterValue(value === '' ? undefined : { operator, value });
-	}
-
-	protected _onRange(header: any, meta: BrnColumnFilterMeta, event: Event): void {
-		const [from, to] = this._rootValues(this._filterRoot(event));
-		header.column.setFilterValue(
-			from === undefined && to === undefined ? undefined : { operator: 'between', value: [from, to] },
-		);
-	}
-
-	protected _onChoice(header: any, meta: BrnColumnFilterMeta, event: Event): void {
-		const operator = this._rootOperator(this._filterRoot(event), meta);
-		const choice = (event.target as HTMLSelectElement).value;
-		if (choice === '') {
-			header.column.setFilterValue(undefined);
-			return;
-		}
-		const value = meta.type === 'boolean' ? choice === 'true' : this._optionFor(meta, choice);
-		header.column.setFilterValue({ operator, value });
-	}
-
-	protected _onToggleOption(header: any, value: unknown, checked: boolean): void {
-		const key = this._optionValue(value);
-		const rest = this._chosen(header).filter((entry) => this._optionValue(entry) !== key);
-		const next = checked ? [...rest, value] : rest;
-		header.column.setFilterValue({ operator: 'in', value: next.length ? next : undefined });
 	}
 
 	/** The search box needs `globalFilteringFeature`; without it the table has no global filter API. */
@@ -768,11 +490,21 @@ export class HlmDataGrid<TData extends RowData> {
 		return id;
 	}
 
-	protected _chipLabel(chip: BrnFilter): string {
+	protected _chipLabel(chip: BrnFilter | BrnFilterGroup): string {
 		return this._columnLabel(chip.id);
 	}
 
-	protected _chipValue(chip: BrnFilter): string {
+	protected _chipValue(chip: BrnFilter | BrnFilterGroup): string {
+		if (isFilterGroup(chip)) {
+			const members = chip.filters
+				.filter((entry): entry is BrnFilter => !!entry)
+				.map((entry) => this._singleChipValue(entry));
+			return members.join(chip.logic === 'or' ? ' or ' : ' and ');
+		}
+		return this._singleChipValue(chip);
+	}
+
+	private _singleChipValue(chip: BrnFilter): string {
 		const option = (value: unknown) => {
 			const def = brnFlattenColumnDefs(this.columns()).find((entry) => brnColumnDefId(entry) === chip.id);
 			const match = def?.meta?.filter?.options?.find(
@@ -791,7 +523,7 @@ export class HlmDataGrid<TData extends RowData> {
 		return `${operator} ${option(chip.value)}`;
 	}
 
-	protected _removeLabel(chip: BrnFilter): string {
+	protected _removeLabel(chip: BrnFilter | BrnFilterGroup): string {
 		return `Remove ${this._chipLabel(chip)} filter`;
 	}
 
@@ -808,19 +540,3 @@ export class HlmDataGrid<TData extends RowData> {
 		table?.setGlobalFilter?.(undefined);
 	}
 }
-
-/** English display names of the filter operators; override per grid with `operatorLabels`. */
-export const HLM_DATA_GRID_OPERATOR_LABELS: Record<BrnFilterOperator, string> = {
-	contains: 'contains',
-	equals: 'is',
-	startsWith: 'starts with',
-	endsWith: 'ends with',
-	gt: '>',
-	gte: '≥',
-	lt: '<',
-	lte: '≤',
-	between: 'between',
-	in: 'is any of',
-	isEmpty: 'is empty',
-	notEmpty: 'is not empty',
-};
