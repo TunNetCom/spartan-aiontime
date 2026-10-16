@@ -15,10 +15,50 @@ import { SectionSubHeading } from '../../../../shared/layout/section-sub-heading
 import { Tabs } from '../../../../shared/layout/tabs';
 import { TabsCli } from '../../../../shared/layout/tabs-cli';
 import { metaWith } from '../../../../shared/meta/meta.util';
+import { DataGridComposedPreview } from './data-grid--composed.preview';
+import { DataGridFiltersPreview } from './data-grid--filters.preview';
+import { DataGridProgrammaticPreview } from './data-grid--programmatic.preview';
 import { DataGridGraphQLPreview } from './data-grid-graphql.preview';
 import { DataGridODataPreview } from './data-grid-odata.preview';
 import { DataGridServerPreview } from './data-grid-server.preview';
 import { DataGridPreview, defaultImports, defaultSkeleton } from './data-grid.preview';
+
+const columnMetaCode = `
+import type { BrnDataGridColumnMeta } from '@spartan-ng/brain/data-grid';
+
+const features = tableFeatures({
+  columnVisibilityFeature,
+  rowPaginationFeature,
+  columnFilteringFeature,
+  columnMeta: {} as BrnDataGridColumnMeta, // types meta.filter on every column
+});
+
+const columnHelper = createColumnHelper<typeof features, Employee>();
+
+const columns = [
+  // string: contains, equals, startsWith, endsWith, isEmpty, notEmpty, notContains, notEquals, isNull, notNull
+  columnHelper.accessor('name', { header: 'Name', meta: { filter: { type: 'string', label: 'Name' } } }),
+  // number / date: equals, gt, gte, lt, lte, between, notEquals, isNull, notNull
+  columnHelper.accessor('age', { header: 'Age', meta: { filter: { type: 'number' } } }),
+  columnHelper.accessor('joined', { header: 'Joined', meta: { filter: { type: 'date' } } }),
+  // boolean: equals, notEquals, isNull, notNull
+  columnHelper.accessor('active', { header: 'Active', meta: { filter: { type: 'boolean' } } }),
+  // select: in, equals, isEmpty, notEmpty, notEquals, isNull, notNull
+  columnHelper.accessor('role', {
+    header: 'Role',
+    meta: {
+      filter: {
+        type: 'select',
+        options: [
+          { label: 'Engineer', value: 'engineer' },
+          { label: 'Designer', value: 'designer' },
+        ],
+        operators: ['in', 'equals'], // optional: restrict the operators offered
+      },
+    },
+  }),
+];
+`;
 
 export const routeMeta: RouteMeta = {
 	data: { breadcrumb: 'Data Grid', api: 'data-grid' },
@@ -42,6 +82,9 @@ export const routeMeta: RouteMeta = {
 		DataGridServerPreview,
 		DataGridODataPreview,
 		DataGridGraphQLPreview,
+		DataGridFiltersPreview,
+		DataGridProgrammaticPreview,
+		DataGridComposedPreview,
 		CodePreview,
 		PageNav,
 		PageBottomNav,
@@ -87,43 +130,93 @@ export const routeMeta: RouteMeta = {
 
 			<spartan-section-sub-heading id="sorting-filtering">Sorting & filtering</spartan-section-sub-heading>
 			<p class="${hlmP}">
-				The grid ships its sorting and filtering UI: every sortable header renders a sort button with
+				Every sortable header renders a sort button with
 				<code class="${hlmCode}">aria-sort</code>
-				(shift-click adds a multi-column sort), and the toolbar holds the global search, the active-filter chips, and
-				the clear-all action. Per-column filter controls come from the column definition's
+				(shift-click adds a multi-column sort), and every filterable header gets a filter button that opens a popover.
+				The popover edits a draft and only writes to the grid on
+				<em>Apply</em>
+				, so typing never refetches;
+				<em>Advanced</em>
+				combines two conditions with
+				<em>And</em>
+				/
+				<em>Or</em>
+				, and a dot on the button marks an active filter. The toolbar holds the global search, one chip per active
+				filter, and the clear-all action. Sorting needs
+				<code class="${hlmCode}">rowSortingFeature</code>
+				, filtering
+				<code class="${hlmCode}">columnFilteringFeature</code>
+				and the search
+				<code class="${hlmCode}">globalFilteringFeature</code>
+				.
+			</p>
+			<spartan-tabs firstTab="Preview" secondTab="Code">
+				<div spartanCodePreview firstTab>
+					<spartan-data-grid-filters-preview />
+				</div>
+				<spartan-code secondTab [code]="_filtersCode()" />
+			</spartan-tabs>
+
+			<spartan-section-sub-heading id="column-filters">Column filters</spartan-section-sub-heading>
+			<p class="${hlmP}">
+				A column is filterable when its definition declares
 				<code class="${hlmCode}">meta.filter</code>
 				(
 				<code class="${hlmCode}">BrnDataGridColumnMeta</code>
-				): declare the column
+				). Its
 				<code class="${hlmCode}">type</code>
-				(
-				<code class="${hlmCode}">string | number | date | boolean | select</code>
-				) and the grid renders the matching control: text operators, a single value or a from/to pair (with
+				picks the operators and the control: text operators for
+				<code class="${hlmCode}">string</code>
+				, a single value or a from/to pair (with
 				<code class="${hlmCode}">between</code>
-				) for numbers and dates, a boolean choice, and a single option or a checkbox list (with
+				) for
+				<code class="${hlmCode}">number</code>
+				and
+				<code class="${hlmCode}">date</code>
+				, a choice for
+				<code class="${hlmCode}">boolean</code>
+				, and a single option or a checkbox list (with
 				<code class="${hlmCode}">in</code>
-				) for selects. Each filter is resolved to its operator and its value coerced to the declared type (
+				) for
+				<code class="${hlmCode}">select</code>
+				. Each filter is resolved to its operator and its value coerced to the declared type (
 				<code class="${hlmCode}">'30'</code>
 				becomes
 				<code class="${hlmCode}">30</code>
-				) before the adapter maps it, and date-only bounds cover the whole day, so
-				<code class="${hlmCode}">2024-01-31</code>
-				as an upper bound also matches that day's timestamps. Rename the operators with
+				) before the adapter maps it, and date-only bounds cover the whole day. Register
+				<code class="${hlmCode}">columnMeta</code>
+				once on the features to type
+				<code class="${hlmCode}">meta</code>
+				without a cast, and rename the operators with
 				<code class="${hlmCode}">operatorLabels</code>
-				. Filtering needs
-				<code class="${hlmCode}">columnFilteringFeature</code>
-				in your features, the toolbar search needs
-				<code class="${hlmCode}">globalFilteringFeature</code>
-				. For fully custom controls, drive the exposed
-				<code class="${hlmCode}">table</code>
-				(
-				<code class="${hlmCode}">column.setFilterValue({{ '{' }} operator, value {{ '}' }})</code>
-				,
-				<code class="${hlmCode}">column.toggleSorting</code>
-				,
-				<code class="${hlmCode}">table.setGlobalFilter</code>
-				) instead.
+				.
 			</p>
+			<spartan-code [code]="_columnMetaCode" />
+
+			<spartan-section-sub-heading id="programmatic">Driving the grid from code</spartan-section-sub-heading>
+			<p class="${hlmP}">
+				Query the grid with
+				<code class="${hlmCode}">viewChild(HlmDataGrid)</code>
+				and drive its TanStack
+				<code class="${hlmCode}">table</code>
+				: write a filter with
+				<code class="${hlmCode}">column.setFilterValue({{ '{' }} operator, value {{ '}' }})</code>
+				, sort with
+				<code class="${hlmCode}">table.setSorting</code>
+				, or page with
+				<code class="${hlmCode}">table.setPageIndex</code>
+				. Read the resolved page, sort and filters from
+				<code class="${hlmCode}">state()</code>
+				, and refetch with
+				<code class="${hlmCode}">reload()</code>
+				.
+			</p>
+			<spartan-tabs firstTab="Preview" secondTab="Code">
+				<div spartanCodePreview firstTab>
+					<spartan-data-grid-programmatic-preview />
+				</div>
+				<spartan-code secondTab [code]="_programmaticCode()" />
+			</spartan-tabs>
 
 			<spartan-section-sub-heading id="server-pagination">Server pagination (REST)</spartan-section-sub-heading>
 			<p class="${hlmP}">
@@ -236,6 +329,33 @@ export const routeMeta: RouteMeta = {
 				<spartan-code secondTab [code]="_graphqlCode()" />
 			</spartan-tabs>
 
+			<spartan-section-sub-heading id="composition">Composition</spartan-section-sub-heading>
+			<p class="${hlmP}">
+				<code class="${hlmCode}">hlm-data-grid</code>
+				is built from parts you can use on their own. Put
+				<code class="${hlmCode}">brnDataGrid</code>
+				on a spartan
+				<code class="${hlmCode}">hlmTable</code>
+				to own the state and fetching, render the rows from its
+				<code class="${hlmCode}">table</code>
+				, and drop in
+				<code class="${hlmCode}">hlm-data-grid-column-filter</code>
+				and
+				<code class="${hlmCode}">hlm-data-grid-pagination</code>
+				where you need them. The headless
+				<code class="${hlmCode}">brnColumnFilter</code>
+				powers the filter popover if you want to build your own control.
+			</p>
+			<spartan-tabs firstTab="Preview" secondTab="Code">
+				<div spartanCodePreview firstTab>
+					<spartan-data-grid-composed-preview />
+				</div>
+				<spartan-code secondTab [code]="_composedCode()" />
+			</spartan-tabs>
+
+			<spartan-section-sub-heading id="brn-api">Brain API</spartan-section-sub-heading>
+			<spartan-ui-api-docs docType="brain" />
+
 			<spartan-section-sub-heading id="hlm-api">Helm API</spartan-section-sub-heading>
 			<spartan-ui-api-docs docType="helm" />
 
@@ -257,6 +377,10 @@ export default class DataGridPage {
 	protected readonly _serverCode = computed(() => this._snippets()['server']);
 	protected readonly _odataCode = computed(() => this._snippets()['odata']);
 	protected readonly _graphqlCode = computed(() => this._snippets()['graphql']);
+	protected readonly _filtersCode = computed(() => this._snippets()['filters']);
+	protected readonly _programmaticCode = computed(() => this._snippets()['programmatic']);
+	protected readonly _composedCode = computed(() => this._snippets()['composed']);
+	protected readonly _columnMetaCode = columnMetaCode;
 	protected readonly _imports = defaultImports;
 	protected readonly _codeSkeleton = defaultSkeleton;
 }

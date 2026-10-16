@@ -198,6 +198,7 @@ The following is the list of supported scopes:
 - **combobox**
 - **command**
 - **context-menu**
+- **data-grid**
 - **data-table**
 - **date-picker**
 - **dialog**

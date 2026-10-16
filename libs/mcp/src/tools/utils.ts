@@ -31,6 +31,7 @@ export const KNOWN_COMPONENTS: string[] = [
 	'combobox',
 	'command',
 	'context-menu',
+	'data-grid',
 	'data-table',
 	'date-picker',
 	'dialog',

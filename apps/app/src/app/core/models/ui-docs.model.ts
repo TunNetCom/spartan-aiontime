@@ -37,6 +37,7 @@ export type Primitives =
 	| 'collapsible'
 	| 'command'
 	| 'context-menu'
+	| 'data-grid'
 	| 'date-picker'
 	| 'dialog'
 	| 'empty'

@@ -47,6 +47,7 @@ What kind of change does this PR introduce?
 - [ ] combobox
 - [ ] command
 - [ ] context-menu
+- [ ] data-grid
 - [ ] data-table
 - [ ] date-picker
 - [ ] dialog

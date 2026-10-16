@@ -300,7 +300,7 @@ Still stuck? Provide more details about your setup and error messages.
 				Overlay: ['popover', 'dropdown-menu', 'context-menu', 'sheet'],
 				Layout: ['aspect-ratio', 'scroll-area', 'collapsible', 'accordion', 'carousel', 'resizable', 'sidebar'],
 				'Date & Time': ['calendar', 'date-picker'],
-				Advanced: ['data-table', 'form-field', 'combobox', 'icon', 'navigation-menu'],
+				Advanced: ['data-grid', 'data-table', 'form-field', 'combobox', 'icon', 'navigation-menu'],
 				Utility: ['empty', 'kbd'],
 				Chat: ['attachment', 'bubble', 'marker', 'message', 'message-scroller'],
 			};
