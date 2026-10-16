@@ -1,4 +1,3 @@
-
 name: publish-azure
 
 # Manual publish of the built npm packages (brain/cli/mcp)
