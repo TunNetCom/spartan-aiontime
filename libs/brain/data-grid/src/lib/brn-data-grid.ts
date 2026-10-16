@@ -1,4 +1,14 @@
-import { Directive, Injector, inject, input, runInInjectionContext, type OnInit, type Signal } from '@angular/core';
+import {
+	computed,
+	Directive,
+	inject,
+	Injector,
+	input,
+	runInInjectionContext,
+	signal,
+	type OnInit,
+	type Signal,
+} from '@angular/core';
 import type { ColumnDef, RowData, TableFeatures } from '@tanstack/angular-table';
 import { injectBrnDataGrid } from './brn-data-grid-state';
 import type { BrnDataAdapter, BrnGridState } from './brn-data-source';
@@ -50,7 +60,12 @@ export class BrnDataGrid<TData extends RowData> implements OnInit {
 	public readonly debounceMs = input(300);
 
 	private readonly _injector = inject(Injector);
-	private _grid: ReturnType<typeof injectBrnDataGrid<TData>> | undefined;
+	/**
+	 * A signal, not a plain field: a parent template or `computed` that reads the grid before this
+	 * directive's ngOnInit (e.g. a query preview rendered above the table) tracks it and updates once
+	 * the grid starts, instead of caching its pre-init fallback forever.
+	 */
+	private readonly _grid = signal<ReturnType<typeof injectBrnDataGrid<TData>> | undefined>(undefined);
 
 	ngOnInit(): void {
 		// Built here rather than in a field initializer: the grid evaluates its required inputs the
@@ -63,7 +78,7 @@ export class BrnDataGrid<TData extends RowData> implements OnInit {
 		const columns = this.columns;
 		const initial = this.initial();
 		const debounceMs = this.debounceMs();
-		this._grid = runInInjectionContext(this._injector, () =>
+		const grid = runInInjectionContext(this._injector, () =>
 			injectBrnDataGrid<TData>({
 				get adapter() {
 					return adapter();
@@ -78,6 +93,7 @@ export class BrnDataGrid<TData extends RowData> implements OnInit {
 				debounceMs,
 			}),
 		);
+		this._grid.set(grid);
 	}
 
 	/**
@@ -88,39 +104,42 @@ export class BrnDataGrid<TData extends RowData> implements OnInit {
 	}
 
 	/**
-	 * The rows of the current page.
+	 * The rows of the current page. Readable before the grid starts (empty until the first page).
 	 */
-	public get rows(): Signal<TData[]> {
-		return this._assertGrid().data;
-	}
+	public readonly rows: Signal<TData[]> = computed(() => this._grid()?.data() ?? []);
 
 	/**
-	 * Total row count reported by the adapter.
+	 * Total row count reported by the adapter (`0` until the first page).
 	 */
-	public get total(): Signal<number> {
-		return this._assertGrid().total;
-	}
+	public readonly total: Signal<number> = computed(() => this._grid()?.total() ?? 0);
 
 	/**
 	 * Whether a fetch is in flight.
 	 */
-	public get loading(): Signal<boolean> {
-		return this._assertGrid().loading;
-	}
+	public readonly loading: Signal<boolean> = computed(() => this._grid()?.loading() ?? false);
 
 	/**
 	 * The last fetch error, if any.
 	 */
-	public get error(): Signal<unknown> {
-		return this._assertGrid().error;
-	}
+	public readonly error: Signal<unknown> = computed(() => this._grid()?.error() ?? null);
 
 	/**
-	 * The current page, pageSize, sorting, filters and globalFilter.
+	 * The current page, pageSize, sorting, filters and globalFilter. Readable before the grid starts,
+	 * so a parent template can show it (e.g. a query preview): it reports the `initial` state until
+	 * ngOnInit, then follows the grid.
 	 */
-	public get state(): Signal<BrnGridState> {
-		return this._assertGrid().state;
-	}
+	public readonly state: Signal<BrnGridState> = computed(() => {
+		const grid = this._grid();
+		if (grid) return grid.state();
+		const initial = this.initial();
+		return {
+			page: initial.page ?? 0,
+			pageSize: initial.pageSize ?? 10,
+			sorting: initial.sorting ?? [],
+			filters: initial.filters ?? [],
+			...(initial.globalFilter ? { globalFilter: initial.globalFilter } : {}),
+		};
+	});
 
 	/**
 	 * Refetches the current page.
@@ -138,9 +157,10 @@ export class BrnDataGrid<TData extends RowData> implements OnInit {
 	}
 
 	private _assertGrid() {
-		if (!this._grid) {
+		const grid = this._grid();
+		if (!grid) {
 			throw new Error('BrnDataGrid: the grid is only available from ngOnInit onwards.');
 		}
-		return this._grid;
+		return grid;
 	}
 }

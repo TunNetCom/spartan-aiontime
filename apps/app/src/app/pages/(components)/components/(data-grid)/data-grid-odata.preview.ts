@@ -109,7 +109,11 @@ export class DataGridODataPreview {
 	protected readonly _query = computed(() => adapter.buildQuery(this._grid().state()));
 
 	protected readonly _sortLabel = computed(() => {
-		const sort = this._grid().table.getColumn('email')?.getIsSorted();
+		// Read from `state()`, which is available before the grid starts; `table` is not.
+		const email = this._grid()
+			.state()
+			.sorting.find((entry) => entry.id === 'email');
+		const sort = email ? (email.desc ? 'desc' : 'asc') : false;
 		return sort === 'desc' ? '↓' : sort === 'asc' ? '↑' : '↕';
 	});
 

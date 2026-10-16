@@ -1,4 +1,4 @@
-import { ApplicationRef, ChangeDetectionStrategy, Component } from '@angular/core';
+import { ApplicationRef, ChangeDetectionStrategy, Component, computed, viewChild } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import {
@@ -127,5 +127,49 @@ describe('BrnDataGrid directive', () => {
 
 		expect(el.querySelector('[data-testid="filter"]')?.textContent).toContain('ada');
 		expect(el.querySelector('[data-testid="filtered"]')?.textContent).toBe('true');
+	});
+});
+
+@Component({
+	selector: 'brn-data-grid-preview-host',
+	imports: [BrnDataGrid],
+	changeDetection: ChangeDetectionStrategy.OnPush,
+	template: `
+		<!-- Rendered above the grid, so it first runs before BrnDataGrid's ngOnInit. -->
+		<span data-testid="preview">{{ preview() }}</span>
+		<table brnDataGrid [adapter]="adapter" [features]="features" [columns]="columns"></table>
+		<span data-testid="total">{{ total() }}</span>
+	`,
+})
+class PreviewHost {
+	public readonly adapter = adapter;
+	public readonly features = features;
+	public readonly columns = columns;
+	private readonly _grid = viewChild(BrnDataGrid);
+	public readonly total = computed(() => this._grid()?.total() ?? -1);
+
+	// No try/catch: `state` is readable before the grid starts and then follows it.
+	public readonly preview = computed(() => `page ${this._grid()?.state().page ?? '…'}`);
+}
+
+describe('BrnDataGrid read before init', () => {
+	afterEach(() => {
+		TestBed.resetTestingModule();
+	});
+
+	it('lets a parent template read the state before the grid starts, then follow it', async () => {
+		TestBed.configureTestingModule({ imports: [PreviewHost] });
+		const fixture = TestBed.createComponent(PreviewHost);
+		await fixture.whenStable();
+		fixture.detectChanges();
+
+		// The computed first runs before ngOnInit (initial state), then must track the started grid.
+		expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="preview"]')?.textContent).toBe('page 0');
+		expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="total"]')?.textContent).toBe('42');
+
+		fixture.debugElement.query(By.directive(BrnDataGrid)).injector.get(BrnDataGrid).table.setPageIndex(2);
+		await fixture.whenStable();
+		fixture.detectChanges();
+		expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="preview"]')?.textContent).toBe('page 2');
 	});
 });
