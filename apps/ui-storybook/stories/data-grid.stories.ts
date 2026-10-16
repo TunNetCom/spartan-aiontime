@@ -1,15 +1,19 @@
-import { Component, computed, viewChild } from '@angular/core';
+import { Component, computed, viewChild, type Signal } from '@angular/core';
 import { faker } from '@faker-js/faker';
 import {
+	BrnDataGridImports,
 	createGraphQLAdapter,
 	createODataAdapter,
 	createRestAdapter,
 	type BrnDataGridColumnMeta,
 	type BrnFilter,
+	type BrnFilterGroup,
+	type BrnGridState,
 } from '@spartan-ng/brain/data-grid';
 import { HlmButtonImports } from '@spartan-ng/helm/button';
-import { HlmDataGrid } from '@spartan-ng/helm/data-grid';
+import { HlmDataGrid, HlmDataGridColumnFilter, HlmDataGridPagination } from '@spartan-ng/helm/data-grid';
 import { HlmInputImports } from '@spartan-ng/helm/input';
+import { HlmTableImports } from '@spartan-ng/helm/table';
 import type { Meta, StoryObj } from '@storybook/angular';
 import { moduleMetadata } from '@storybook/angular';
 import {
@@ -18,6 +22,7 @@ import {
 	createColumnHelper,
 	filterFn_includesString,
 	filterFn_weakEquals,
+	FlexRender,
 	globalFilteringFeature,
 	rowPaginationFeature,
 	rowSelectionFeature,
@@ -490,6 +495,16 @@ const matchFilterable = (row: DataGridFilterableUser, id: string, op: string, va
 			return field === undefined || field === null || field === '';
 		case 'notEmpty':
 			return !(field === undefined || field === null || field === '');
+		case 'notContains':
+			return !String(field ?? '')
+				.toLowerCase()
+				.includes(value.toLowerCase());
+		case 'notEquals':
+			return String(field ?? '') !== value;
+		case 'isNull':
+			return field === undefined || field === null;
+		case 'notNull':
+			return field !== undefined && field !== null;
 		default:
 			return true;
 	}
@@ -516,11 +531,29 @@ const filterableAdapter = createRestAdapter<DataGridFilterableUser>({
 				: params.get('sortBy')
 					? [{ id: params.get('sortBy') ?? '', desc: params.get('sortDir') === 'desc' }]
 					: [];
+		// Plain filters (`filter[age][gte]=18`) are AND-ed. A two-condition group arrives as
+		// `filter[name][0][contains]=a&filter[name][1][contains]=b&filter[name][logic]=or`.
+		const groups = new Map<string, { logic: string; conditions: { op: string; value: string }[] }>();
+		const plain: { id: string; op: string; value: string }[] = [];
+		for (const [key, value] of params) {
+			const match = key.match(/^filter\[(.+?)\](?:\[(\d)\])?(?:\[(.+?)\])?$/);
+			if (!match || match[3] === 'case') continue;
+			const [, id, index, op = 'contains'] = match;
+			if (op === 'logic' || index !== undefined) {
+				const group = groups.get(id) ?? { logic: 'and', conditions: [] };
+				if (op === 'logic') group.logic = value;
+				else group.conditions.push({ op, value });
+				groups.set(id, group);
+			} else {
+				plain.push({ id, op, value });
+			}
+		}
 		let rows = FILTERABLE_USERS.filter((row) => {
 			if (term && ![row.name, row.email, row.status].some((v) => v.toLowerCase().includes(term))) return false;
-			for (const [key, value] of params) {
-				const match = key.match(/^filter\[(.+?)\](?:\[(.+?)\])?$/);
-				if (match && !matchFilterable(row, match[1], match[2] ?? 'contains', value)) return false;
+			if (!plain.every(({ id, op, value }) => matchFilterable(row, id, op, value))) return false;
+			for (const [id, { logic, conditions }] of groups) {
+				const results = conditions.map(({ op, value }) => matchFilterable(row, id, op, value));
+				if (logic === 'or' ? !results.some(Boolean) : !results.every(Boolean)) return false;
 			}
 			return true;
 		});
@@ -627,6 +660,248 @@ class CombinedStory {
 	});
 }
 
+/** Reads the query the grid would send; the child grid only exists after view init. */
+const queryOf = (grid: () => { state: Signal<BrnGridState> }): string => {
+	try {
+		return `/api/users?${new URLSearchParams(filterableAdapter.buildQuery(grid().state())).toString()}`;
+	} catch {
+		return '/api/users?…';
+	}
+};
+
+const ADVANCED_FILTERS: BrnFilterGroup[] = [
+	{
+		id: 'status',
+		logic: 'or',
+		type: 'select',
+		filters: [
+			{ id: 'status', operator: 'equals', value: 'open', type: 'select' },
+			{ id: 'status', operator: 'equals', value: 'pending', type: 'select' },
+		],
+	},
+];
+
+@Component({
+	selector: 'data-grid-advanced-filters-story',
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<p class="text-muted-foreground font-mono text-xs break-all">GET {{ _queryString() }}</p>
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" [initial]="initial" />
+	`,
+})
+class AdvancedFiltersStory {
+	public readonly adapter = filterableAdapter;
+	public readonly features = filterableFeatures;
+	public readonly columns = filterableColumns;
+	/** Starts on a two-condition group, so the Status popover opens in Advanced mode. */
+	public readonly initial = { pageSize: 5, filters: ADVANCED_FILTERS };
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+	protected readonly _queryString = computed(() => queryOf(this._grid));
+}
+
+@Component({
+	selector: 'data-grid-localized-story',
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<hlm-data-grid
+			[adapter]="adapter"
+			[features]="features"
+			[columns]="columns"
+			[initial]="{ pageSize: 5 }"
+			[operatorLabels]="operatorLabels"
+			searchLabel="Rechercher"
+			searchPlaceholder="Rechercher…"
+			clearAllText="Tout effacer"
+			loadingText="Chargement…"
+			emptyText="Aucun résultat."
+			errorText="Échec du chargement."
+			retryText="Réessayer"
+			valueText="valeur"
+			fromText="De"
+			toText="À"
+			allText="Tous"
+			trueText="Oui"
+			falseText="Non"
+		/>
+	`,
+})
+class LocalizedStory {
+	public readonly adapter = filterableAdapter;
+	public readonly features = filterableFeatures;
+	public readonly columns = filterableColumns;
+	public readonly operatorLabels = {
+		contains: 'contient',
+		equals: 'est',
+		startsWith: 'commence par',
+		endsWith: 'finit par',
+		between: 'entre',
+		in: 'est parmi',
+		isEmpty: 'est vide',
+		notEmpty: "n'est pas vide",
+	};
+}
+
+@Component({
+	selector: 'data-grid-programmatic-story',
+	imports: [HlmDataGrid, HlmButtonImports],
+	host: { class: 'block w-full' },
+	template: `
+		<div class="flex flex-wrap gap-2 pb-2">
+			<button hlmBtn size="sm" variant="outline" data-testid="adults" (click)="_adults()">Age 30 and over</button>
+			<button hlmBtn size="sm" variant="outline" data-testid="open" (click)="_openOnly()">Open only</button>
+			<button hlmBtn size="sm" variant="outline" data-testid="oldest" (click)="_oldestFirst()">Oldest first</button>
+			<button hlmBtn size="sm" variant="outline" data-testid="page-2" (click)="_pageTwo()">Page 2</button>
+			<button hlmBtn size="sm" variant="ghost" data-testid="reset" (click)="_reset()">Reset</button>
+		</div>
+		<p class="text-muted-foreground font-mono text-xs break-all">GET {{ _queryString() }}</p>
+		<hlm-data-grid
+			[adapter]="adapter"
+			[features]="features"
+			[columns]="columns"
+			[initial]="{ pageSize: 5 }"
+			[showToolbar]="false"
+		/>
+	`,
+})
+class ProgrammaticStory {
+	public readonly adapter = filterableAdapter;
+	public readonly features = filterableFeatures;
+	public readonly columns = filterableColumns;
+
+	private readonly _grid = viewChild.required(HlmDataGrid);
+	protected readonly _queryString = computed(() => queryOf(this._grid));
+
+	protected _adults(): void {
+		this._grid().table.getColumn('age')?.setFilterValue({ operator: 'gte', value: 30 });
+	}
+
+	protected _openOnly(): void {
+		this._grid().table.getColumn('status')?.setFilterValue({ operator: 'equals', value: 'open' });
+	}
+
+	protected _oldestFirst(): void {
+		this._grid().table.setSorting([{ id: 'age', desc: true }]);
+	}
+
+	protected _pageTwo(): void {
+		this._grid().table.setPageIndex(1);
+	}
+
+	protected _reset(): void {
+		const table = this._grid().table;
+		table.resetColumnFilters(true);
+		table.resetSorting(true);
+		table.setPageIndex(0);
+	}
+}
+
+@Component({
+	selector: 'data-grid-composed-story',
+	imports: [
+		...BrnDataGridImports,
+		...HlmTableImports,
+		...HlmButtonImports,
+		HlmDataGridColumnFilter,
+		HlmDataGridPagination,
+		FlexRender,
+	],
+	host: { class: 'block w-full' },
+	template: `
+		<div hlmTableContainer>
+			<table
+				hlmTable
+				brnDataGrid
+				#grid="brnDataGrid"
+				[adapter]="adapter"
+				[features]="features"
+				[columns]="columns"
+				[initial]="{ pageSize: 5 }"
+			>
+				<thead hlmTHead>
+					@for (headerGroup of grid.table.getHeaderGroups(); track headerGroup.id) {
+						<tr hlmTr>
+							@for (header of headerGroup.headers; track header.id) {
+								<th hlmTh [attr.aria-sort]="_ariaSort(header.column.getIsSorted())">
+									<div class="flex items-center gap-1">
+										<button
+											hlmBtn
+											variant="ghost"
+											size="sm"
+											data-testid="sort"
+											(click)="header.column.toggleSorting(undefined, $event.shiftKey)"
+										>
+											<ng-container *flexRenderHeader="header; let text">{{ text }}</ng-container>
+										</button>
+										<hlm-data-grid-column-filter [column]="header.column" />
+									</div>
+								</th>
+							}
+						</tr>
+					}
+				</thead>
+				<tbody hlmTBody>
+					@for (row of grid.table.getRowModel().rows; track row.id) {
+						<tr hlmTr>
+							@for (cell of row.getVisibleCells(); track cell.id) {
+								<td hlmTd>
+									<ng-container *flexRenderCell="cell; let text">
+										<span [innerHTML]="text"></span>
+									</ng-container>
+								</td>
+							}
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+		<hlm-data-grid-pagination [table]="grid.table" [pageSizeOptions]="[5, 10]" />
+	`,
+})
+class ComposedStory {
+	public readonly adapter = filterableAdapter;
+	public readonly features = filterableFeatures;
+	public readonly columns = filterableColumns;
+
+	protected _ariaSort(sorted: false | 'asc' | 'desc'): 'none' | 'ascending' | 'descending' {
+		return sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none';
+	}
+}
+
+const minimalFeatures = tableFeatures({ columnVisibilityFeature, rowPaginationFeature });
+const minimalColumnHelper = createColumnHelper<typeof minimalFeatures, DataGridStoryUser>();
+const minimalColumns = [
+	minimalColumnHelper.accessor('name', { header: 'Name', cell: (info) => info.getValue<string>() }),
+	minimalColumnHelper.accessor('email', { header: 'Email', cell: (info) => info.getValue<string>() }),
+];
+const minimalAdapter = createRestAdapter<DataGridStoryUser>({
+	baseUrl: '/api/users',
+	fetchFn: async (url, signal) => {
+		signal.throwIfAborted();
+		const params = new URLSearchParams(url.split('?')[1] ?? '');
+		const page = Number(params.get('page') ?? '1') - 1;
+		const pageSize = Number(params.get('pageSize') ?? '10');
+		return { rows: REST_USERS.slice(page * pageSize, (page + 1) * pageSize), total: REST_USERS.length };
+	},
+});
+
+@Component({
+	selector: 'data-grid-minimal-story',
+	imports: [HlmDataGrid],
+	host: { class: 'block w-full' },
+	template: `
+		<hlm-data-grid [adapter]="adapter" [features]="features" [columns]="columns" />
+	`,
+})
+class MinimalStory {
+	/** Only the required features: no sort buttons, filter popovers or search render. */
+	public readonly adapter = minimalAdapter;
+	public readonly features = minimalFeatures;
+	public readonly columns = minimalColumns;
+}
+
 const meta: Meta = {
 	title: 'Data Grid',
 	tags: ['autodocs'],
@@ -643,6 +918,11 @@ const meta: Meta = {
 				FilterableStory,
 				SortedStory,
 				CombinedStory,
+				AdvancedFiltersStory,
+				LocalizedStory,
+				ProgrammaticStory,
+				ComposedStory,
+				MinimalStory,
 			],
 		}),
 	],
@@ -717,5 +997,40 @@ export const Combined: StoryObj = {
 	render: () => ({
 		moduleMetadata: { imports: [CombinedStory] },
 		template: '<data-grid-combined-story/>',
+	}),
+};
+
+export const AdvancedFilters: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [AdvancedFiltersStory] },
+		template: '<data-grid-advanced-filters-story/>',
+	}),
+};
+
+export const Localized: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [LocalizedStory] },
+		template: '<data-grid-localized-story/>',
+	}),
+};
+
+export const Programmatic: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [ProgrammaticStory] },
+		template: '<data-grid-programmatic-story/>',
+	}),
+};
+
+export const Composed: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [ComposedStory] },
+		template: '<data-grid-composed-story/>',
+	}),
+};
+
+export const Minimal: StoryObj = {
+	render: () => ({
+		moduleMetadata: { imports: [MinimalStory] },
+		template: '<data-grid-minimal-story/>',
 	}),
 };
