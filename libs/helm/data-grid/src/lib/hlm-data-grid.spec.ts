@@ -355,6 +355,76 @@ async function settleFilter(fixture: ComponentFixture<FilterHost>): Promise<void
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** The open filter panels; the popover renders into the CDK overlay, outside the fixture. */
+const filterPanels = () =>
+	Array.from(document.querySelectorAll('.cdk-overlay-container [data-slot="data-grid-filter-panel"]')) as HTMLElement[];
+
+/** Removes popover overlays left behind by a test so the next one starts clean. */
+const removeOverlays = () => document.querySelectorAll('.cdk-overlay-container').forEach((overlay) => overlay.remove());
+
+/** Opens a column's filter popover and returns its (newly rendered) panel. */
+async function openFilter(
+	fixture: ComponentFixture<FilterHost>,
+	el: HTMLElement,
+	column: string,
+): Promise<HTMLElement> {
+	const before = new Set(filterPanels());
+	const trigger = el.querySelector(
+		`[data-slot="data-grid-filter"][data-column="${column}"] [data-slot="data-grid-filter-trigger"]`,
+	) as HTMLButtonElement;
+	trigger.click();
+	fixture.detectChanges();
+	await fixture.whenStable();
+	fixture.detectChanges();
+	const panel = filterPanels().find((candidate) => !before.has(candidate));
+	expect(panel).toBeTruthy();
+	return panel as HTMLElement;
+}
+
+/** Closes the open popover with Escape, as a keyboard user would. */
+async function closeFilter(fixture: ComponentFixture<FilterHost>): Promise<void> {
+	document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+	fixture.detectChanges();
+	await fixture.whenStable();
+	await sleep(50);
+	fixture.detectChanges();
+}
+
+/** Picks an operator in one condition row of an open panel. */
+function pickOperator(fixture: ComponentFixture<FilterHost>, panel: HTMLElement, operator: string, row = 0): void {
+	const select = panel.querySelectorAll('[data-slot="data-grid-operator"] select')[row] as HTMLSelectElement;
+	select.value = operator;
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	fixture.detectChanges();
+}
+
+/** Types into a panel input (text, number or date). */
+function typeInto(fixture: ComponentFixture<FilterHost>, input: HTMLInputElement, value: string): void {
+	input.value = value;
+	input.dispatchEvent(new Event('input', { bubbles: true }));
+	fixture.detectChanges();
+}
+
+/** Picks a choice in a panel select (boolean or single option). */
+function choose(fixture: ComponentFixture<FilterHost>, panel: HTMLElement, value: string): void {
+	const select = panel.querySelector('[data-slot="data-grid-value"] select') as HTMLSelectElement;
+	select.value = value;
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	fixture.detectChanges();
+}
+
+/** Clicks Apply (or Clear) and waits for the debounced query to reach the backend. */
+async function commitFilter(
+	fixture: ComponentFixture<FilterHost>,
+	panel: HTMLElement,
+	action: 'apply' | 'clear' = 'apply',
+): Promise<void> {
+	(panel.querySelector(`[data-slot="data-grid-filter-${action}"]`) as HTMLButtonElement).click();
+	fixture.detectChanges();
+	await sleep(50);
+	await settleFilter(fixture);
+}
+
 describe('hlm-data-grid sorting', () => {
 	beforeEach(() => {
 		filterLastUrl = '';
@@ -508,109 +578,123 @@ describe('hlm-data-grid column filters', () => {
 		filterFetchImpl = async () => ({ rows: FILTER_USERS, total: 2 });
 	});
 	afterEach(() => {
+		removeOverlays();
 		TestBed.resetTestingModule();
 	});
 
-	it('renders a type-aware filter control per filterable column', async () => {
-		const { el } = await setupFilter();
-
-		expect(el.querySelector('[data-slot="data-grid-filter"][data-column="email"]')).not.toBeNull();
-		expect(el.querySelector('[data-slot="data-grid-filter"][data-column="age"]')).not.toBeNull();
-		expect(el.querySelector('[data-slot="data-grid-filter"][data-column="active"]')).not.toBeNull();
-		expect(el.querySelector('[data-slot="data-grid-filter"][data-column="status"]')).not.toBeNull();
-		expect(el.querySelector('[data-slot="data-grid-filter"][data-column="email"] select')).not.toBeNull();
-	});
-
-	it('writes a text contains filter into the debounced query', async () => {
+	it('renders a type-aware control in each column popover', async () => {
 		const { fixture, el } = await setupFilter();
 
-		const emailFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="email"]') as HTMLElement;
-		const input = emailFilter.querySelector('input') as HTMLInputElement;
-		input.value = 'ada';
-		input.dispatchEvent(new Event('input', { bubbles: true }));
-		fixture.detectChanges();
+		const email = await openFilter(fixture, el, 'email');
+		expect(email.querySelector('input[data-slot="data-grid-value"]')).not.toBeNull();
+		await closeFilter(fixture);
+
+		// Numbers start on `between`, so the panel shows a from/to pair.
+		const age = await openFilter(fixture, el, 'age');
+		expect(age.querySelector('[data-slot="data-grid-value-from"]')).not.toBeNull();
+		expect(age.querySelector('[data-slot="data-grid-value-to"]')).not.toBeNull();
+		await closeFilter(fixture);
+
+		const active = await openFilter(fixture, el, 'active');
+		expect(active.querySelector('[data-slot="data-grid-value"] select')).not.toBeNull();
+		await closeFilter(fixture);
+
+		const status = await openFilter(fixture, el, 'status');
+		const options = Array.from(status.querySelectorAll('[data-slot="data-grid-value"] option')).map((option) =>
+			option.textContent?.trim(),
+		);
+		expect(options).toEqual(['All', 'Open', 'Closed']);
+	});
+
+	it('writes a text contains filter into the query only on Apply', async () => {
+		const { fixture, el } = await setupFilter();
+
+		const panel = await openFilter(fixture, el, 'email');
+		typeInto(fixture, panel.querySelector('input[data-slot="data-grid-value"]') as HTMLInputElement, 'ada');
 		await sleep(50);
 		await settleFilter(fixture);
+		// Editing the draft never reaches the backend.
+		expect(filterLastUrl).not.toContain('filter%5Bemail%5D');
 
+		await commitFilter(fixture, panel);
 		expect(filterLastUrl).toContain('filter%5Bemail%5D=ada');
 	});
 
 	it('switches the text operator and qualifies the query param', async () => {
 		const { fixture, el } = await setupFilter();
 
-		const emailFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="email"]') as HTMLElement;
-		(emailFilter.querySelector('[data-slot="data-grid-operator"] select') as HTMLSelectElement).value = 'startsWith';
-		(emailFilter.querySelector('[data-slot="data-grid-operator"] select') as HTMLSelectElement).dispatchEvent(
-			new Event('change', { bubbles: true }),
-		);
-		const input = emailFilter.querySelector('input') as HTMLInputElement;
-		input.value = 'ad';
-		input.dispatchEvent(new Event('input', { bubbles: true }));
-		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
+		const panel = await openFilter(fixture, el, 'email');
+		pickOperator(fixture, panel, 'startsWith');
+		typeInto(fixture, panel.querySelector('input[data-slot="data-grid-value"]') as HTMLInputElement, 'ad');
+		await commitFilter(fixture, panel);
 
 		expect(filterLastUrl).toContain('filter%5Bemail%5D%5BstartsWith%5D=ad');
 	});
 
-	it('maps a number range to gte/lte bounds and keeps open ends', async () => {
+	it('maps a number range to gte/lte bounds', async () => {
 		const { fixture, el } = await setupFilter();
 
-		const ageFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="age"]') as HTMLElement;
-		const inputs = Array.from(ageFilter.querySelectorAll('input')) as HTMLInputElement[];
-		expect(inputs.length).toBe(2);
-		inputs[0].value = '18';
-		inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
-		inputs[1].value = '65';
-		inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
-		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
+		const panel = await openFilter(fixture, el, 'age');
+		typeInto(fixture, panel.querySelector('[data-slot="data-grid-value-from"]') as HTMLInputElement, '18');
+		typeInto(fixture, panel.querySelector('[data-slot="data-grid-value-to"]') as HTMLInputElement, '65');
+		await commitFilter(fixture, panel);
 
 		expect(filterLastUrl).toContain('filter%5Bage%5D%5Bgte%5D=18');
 		expect(filterLastUrl).toContain('filter%5Bage%5D%5Blte%5D=65');
 	});
 
+	it('keeps a range open-ended when only one bound is set', async () => {
+		const { fixture, el } = await setupFilter();
+
+		const panel = await openFilter(fixture, el, 'age');
+		typeInto(fixture, panel.querySelector('[data-slot="data-grid-value-from"]') as HTMLInputElement, '18');
+		await commitFilter(fixture, panel);
+
+		expect(filterLastUrl).toContain('filter%5Bage%5D%5Bgte%5D=18');
+		expect(filterLastUrl).not.toContain('%5Blte%5D');
+	});
+
 	it('filters booleans and select options without guessing operators', async () => {
 		const { fixture, el } = await setupFilter();
 
-		const activeFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="active"]') as HTMLElement;
-		const activeSelect = activeFilter.querySelector('[data-slot="data-grid-value"] select') as HTMLSelectElement;
-		activeSelect.value = 'true';
-		activeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
+		const active = await openFilter(fixture, el, 'active');
+		choose(fixture, active, 'true');
+		await commitFilter(fixture, active);
 		expect(filterLastUrl).toContain('filter%5Bactive%5D%5Bequals%5D=true');
+		await closeFilter(fixture);
 
-		const statusFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="status"]') as HTMLElement;
-		const statusSelect = statusFilter.querySelector('[data-slot="data-grid-value"] select') as HTMLSelectElement;
-		statusSelect.value = 'open';
-		statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
-		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
-		expect(filterLastUrl).toContain('filter%5Bstatus%5D');
+		const status = await openFilter(fixture, el, 'status');
+		choose(fixture, status, 'open');
+		await commitFilter(fixture, status);
+		expect(filterLastUrl).toContain('filter%5Bstatus%5D%5Bequals%5D=open');
 	});
 
-	it('drops a cleared text filter from the query', async () => {
+	it('removes a column filter with Clear', async () => {
 		const { fixture, el } = await setupFilter();
 
-		const emailFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="email"]') as HTMLElement;
-		const input = emailFilter.querySelector('input') as HTMLInputElement;
-		input.value = 'ada';
-		input.dispatchEvent(new Event('input', { bubbles: true }));
-		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
+		const panel = await openFilter(fixture, el, 'email');
+		typeInto(fixture, panel.querySelector('input[data-slot="data-grid-value"]') as HTMLInputElement, 'ada');
+		await commitFilter(fixture, panel);
 		expect(filterLastUrl).toContain('filter%5Bemail%5D');
 
-		input.value = '';
-		input.dispatchEvent(new Event('input', { bubbles: true }));
-		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
+		await commitFilter(fixture, panel, 'clear');
 		expect(filterLastUrl).not.toContain('filter%5Bemail%5D');
+	});
+
+	it('marks the trigger of a filtered column as active', async () => {
+		const { fixture, el } = await setupFilter();
+		const trigger = () =>
+			el.querySelector(
+				'[data-slot="data-grid-filter"][data-column="email"] [data-slot="data-grid-filter-trigger"]',
+			) as HTMLElement;
+		expect(trigger().getAttribute('data-active')).toBe('false');
+
+		const panel = await openFilter(fixture, el, 'email');
+		typeInto(fixture, panel.querySelector('input[data-slot="data-grid-value"]') as HTMLInputElement, 'ada');
+		await commitFilter(fixture, panel);
+
+		expect(trigger().getAttribute('data-active')).toBe('true');
+		expect(el.querySelector('[data-column="email"] [data-slot="data-grid-filter-dot"]')).not.toBeNull();
 	});
 });
 
@@ -620,6 +704,7 @@ describe('hlm-data-grid toolbar', () => {
 		filterFetchImpl = async () => ({ rows: FILTER_USERS, total: 2 });
 	});
 	afterEach(() => {
+		removeOverlays();
 		TestBed.resetTestingModule();
 	});
 
@@ -640,13 +725,9 @@ describe('hlm-data-grid toolbar', () => {
 	it('shows active-filter chips and removes one filter at a time', async () => {
 		const { fixture, el } = await setupFilter();
 
-		const emailFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="email"]') as HTMLElement;
-		const input = emailFilter.querySelector('input') as HTMLInputElement;
-		input.value = 'ada';
-		input.dispatchEvent(new Event('input', { bubbles: true }));
-		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
+		const panel = await openFilter(fixture, el, 'email');
+		typeInto(fixture, panel.querySelector('input[data-slot="data-grid-value"]') as HTMLInputElement, 'ada');
+		await commitFilter(fixture, panel);
 
 		const chip = el.querySelector('[data-slot="data-grid-chip"]') as HTMLElement;
 		expect(chip?.textContent).toContain('Email');
@@ -661,9 +742,10 @@ describe('hlm-data-grid toolbar', () => {
 	it('clears every filter and the search with one action', async () => {
 		const { fixture, el } = await setupFilter();
 
-		const emailFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="email"]') as HTMLElement;
-		(emailFilter.querySelector('input') as HTMLInputElement).value = 'ada';
-		(emailFilter.querySelector('input') as HTMLInputElement).dispatchEvent(new Event('input', { bubbles: true }));
+		const panel = await openFilter(fixture, el, 'email');
+		typeInto(fixture, panel.querySelector('input[data-slot="data-grid-value"]') as HTMLInputElement, 'ada');
+		await commitFilter(fixture, panel);
+		await closeFilter(fixture);
 		const search = el.querySelector('[data-slot="data-grid-search"] input') as HTMLInputElement;
 		search.value = 'ada';
 		search.dispatchEvent(new Event('input', { bubbles: true }));
@@ -801,61 +883,81 @@ describe('hlm-data-grid advanced filters', () => {
 		filterFetchImpl = async () => ({ rows: FILTER_USERS, total: 2 });
 	});
 	afterEach(() => {
+		removeOverlays();
 		TestBed.resetTestingModule();
 	});
 
-	const pickOperator = (filter: HTMLElement, operator: string) => {
-		const select = filter.querySelector('[data-slot="data-grid-operator"] select') as HTMLSelectElement;
-		select.value = operator;
-		select.dispatchEvent(new Event('change', { bubbles: true }));
-	};
-
-	it('shows one value input for a single-value comparison and keeps the typed value', async () => {
+	it('shows one value input for a single-value comparison', async () => {
 		const { fixture, el } = await setupFilter();
-		const ageFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="age"]') as HTMLElement;
-		const from = ageFilter.querySelector('[data-slot="data-grid-value-from"]') as HTMLInputElement;
-		from.value = '30';
-		from.dispatchEvent(new Event('input', { bubbles: true }));
-		fixture.detectChanges();
 
-		pickOperator(ageFilter, 'gte');
-		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
-
-		const inputs = ageFilter.querySelectorAll('input');
+		const panel = await openFilter(fixture, el, 'age');
+		pickOperator(fixture, panel, 'gte');
+		const inputs = panel.querySelectorAll('input');
 		expect(inputs.length).toBe(1);
-		expect((inputs[0] as HTMLInputElement).value).toBe('30');
+		typeInto(fixture, inputs[0] as HTMLInputElement, '30');
+		await commitFilter(fixture, panel);
+
 		expect(filterLastUrl).toContain('filter%5Bage%5D%5Bgte%5D=30');
 	});
 
 	it('picks several options of a select column with the set operator', async () => {
 		const { fixture, el } = await setupFilter();
-		const statusFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="status"]') as HTMLElement;
-		pickOperator(statusFilter, 'in');
-		fixture.detectChanges();
 
+		const panel = await openFilter(fixture, el, 'status');
+		pickOperator(fixture, panel, 'in');
 		const boxes = () =>
-			Array.from(
-				statusFilter.querySelectorAll('[data-slot="data-grid-value-set"] button[role="checkbox"]'),
-			) as HTMLElement[];
+			Array.from(panel.querySelectorAll('[data-slot="data-grid-value-set"] button[role="checkbox"]')) as HTMLElement[];
 		expect(boxes().length).toBe(2);
 		boxes()[0].click();
 		fixture.detectChanges();
 		boxes()[1].click();
 		fixture.detectChanges();
-		await sleep(50);
-		await settleFilter(fixture);
+		await commitFilter(fixture, panel);
 
 		expect(decodeURIComponent(filterLastUrl)).toContain('filter[status][in]=open,closed');
 		const chip = el.querySelector('[data-slot="data-grid-chip"]') as HTMLElement;
 		expect(chip.textContent).toContain('Open, Closed');
 	});
 
+	it('hides the value control for emptiness checks', async () => {
+		const { fixture, el } = await setupFilter();
+
+		const panel = await openFilter(fixture, el, 'email');
+		pickOperator(fixture, panel, 'isEmpty');
+		expect(panel.querySelector('[data-slot="data-grid-value"]')).toBeNull();
+		await commitFilter(fixture, panel);
+
+		expect(decodeURIComponent(filterLastUrl)).toContain('filter[email][isEmpty]=true');
+	});
+
+	it('combines two conditions in Advanced mode', async () => {
+		const { fixture, el } = await setupFilter();
+
+		const panel = await openFilter(fixture, el, 'email');
+		const advanced = Array.from(panel.querySelectorAll('[data-slot="data-grid-filter-mode"] button')).find(
+			(button) => button.textContent?.trim() === 'Advanced',
+		) as HTMLButtonElement;
+		advanced.click();
+		fixture.detectChanges();
+
+		const values = () => Array.from(panel.querySelectorAll('input[data-slot="data-grid-value"]')) as HTMLInputElement[];
+		expect(values().length).toBe(2);
+		expect(panel.querySelector('[data-slot="data-grid-filter-logic"]')).not.toBeNull();
+		typeInto(fixture, values()[0], 'ada');
+		typeInto(fixture, values()[1], 'grace');
+		expect((panel.querySelector('[data-slot="data-grid-filter-apply"]') as HTMLButtonElement).disabled).toBe(false);
+		await commitFilter(fixture, panel);
+
+		// Both conditions reach the backend, whatever syntax the adapter picks for the group.
+		expect(decodeURIComponent(filterLastUrl)).toContain('ada');
+		expect(decodeURIComponent(filterLastUrl)).toContain('grace');
+	});
+
 	it('labels operators for people rather than with their ids', async () => {
-		const { el } = await setupFilter();
-		const ageFilter = el.querySelector('[data-slot="data-grid-filter"][data-column="age"]') as HTMLElement;
-		const labels = Array.from(ageFilter.querySelectorAll('[data-slot="data-grid-operator"] option')).map((option) =>
+		const { fixture, el } = await setupFilter();
+
+		const panel = await openFilter(fixture, el, 'age');
+		const labels = Array.from(panel.querySelectorAll('[data-slot="data-grid-operator"] option')).map((option) =>
 			option.textContent?.trim(),
 		);
 		expect(labels).toContain('between');
@@ -863,17 +965,14 @@ describe('hlm-data-grid advanced filters', () => {
 		expect(labels).not.toContain('gte');
 	});
 
-	it('gives each grid its own filter control ids', async () => {
-		const first = await setupFilter();
-		const firstId = (
-			first.el.querySelector('[data-slot="data-grid-filter"] [data-slot="data-grid-value"]') as HTMLElement
-		).id;
-		TestBed.resetTestingModule();
-		const second = await setupFilter();
-		const secondId = (
-			second.el.querySelector('[data-slot="data-grid-filter"] [data-slot="data-grid-value"]') as HTMLElement
-		).id;
-		TestBed.resetTestingModule();
+	it('gives each popover its own control ids', async () => {
+		const { fixture, el } = await setupFilter();
+
+		const first = await openFilter(fixture, el, 'name');
+		const firstId = (first.querySelector('[data-slot="data-grid-value"]') as HTMLElement).id;
+		await closeFilter(fixture);
+		const second = await openFilter(fixture, el, 'email');
+		const secondId = (second.querySelector('[data-slot="data-grid-value"]') as HTMLElement).id;
 
 		expect(firstId).not.toBe('');
 		expect(firstId).not.toBe(secondId);
